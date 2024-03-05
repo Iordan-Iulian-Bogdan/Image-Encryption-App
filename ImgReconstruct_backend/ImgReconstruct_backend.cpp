@@ -67,31 +67,6 @@ void recostruct(cv::Mat& img, cv::Mat& out, float p) {
 }
 
 int main() {
-    /*
-    uint64_t n = 1024, m = 256;
-    Matrix<float> A(m, n);
-    Matrix<float> B(n, 1);
-    Matrix<float> C(m);
-    Matrix<float> S(n);
-    Matrix<float> T(m);
-
-    std::thread t1(&Matrix<float>::fill_rand, &A);
-    std::thread t2(&Matrix<float>::fill_randSparse, &B, n/100);
-    t1.join();
-    t2.join(); 
-    //B.display();
-    C = A * B;
-
-    SparseRepSol<float>data(A, C);
-    //data.getDictionary().display();
-    //data.getMeasurement().display();
-    //S = data.solve_ADM(500, 0.001f, 0.001f);
-    S = data.solve_PALM(400, 3);
-
-    (A * B - A * S).display();
-    //B.display();
-    std::cout << '\n';
-    //S.display();*/
 
     cv::Mat img_in = cv::imread("C:\\images\\gpu.png", cv::IMREAD_GRAYSCALE);
     cv::Mat img_out;
