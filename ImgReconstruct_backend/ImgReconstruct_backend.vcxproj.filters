@@ -38,5 +38,13 @@
     <ClInclude Include="sparse_representations_solver.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="AVX_functions.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="gpu_kernels.cl">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

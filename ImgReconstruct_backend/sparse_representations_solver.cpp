@@ -1,5 +1,9 @@
+﻿#define CL_USE_DEPRECATED_OPENCL_2_0_APIS
+#include <CL/cl.hpp>
 #include "sparse_representations_solver.h"
 #include <math.h>
+#include <fstream>
+#include <vector>
 
 template <class T>
 T sign(T f) {
@@ -32,6 +36,116 @@ template <class T>
 Matrix<T> SparseRepSol<T>::getMeasurement() const {
     return b;
 }
+
+template <class T>
+T SparseRepSol<T>::power_method_gpu() {
+		//	finding an avalaible GPU device and setting up OpenCL
+		std::vector<cl::Platform> all_platforms;
+		cl::Platform::get(&all_platforms);
+		cl::Platform default_platform = all_platforms[0];
+		std::vector<cl::Device> all_devices;
+		default_platform.getDevices(CL_DEVICE_TYPE_GPU, &all_devices);
+		cl::Device default_device = all_devices[0];
+		cl::Context context(default_device);
+		std::ifstream src("gpu_kernels.cl");//this is from where the kernels are read
+		std::string str((std::istreambuf_iterator<char>(src)), std::istreambuf_iterator<char>());
+		cl::Program::Sources sources;
+		sources.push_back({ str.c_str(),str.length() });
+		cl::Program program(context, sources);
+		program.build({ default_device });
+
+		Matrix<float> X(A.rows, A.rows);
+
+		//	defining the buffer which will exist on the GPU memory
+		cl::Buffer buffer_A(context, CL_MEM_READ_WRITE, sizeof(T) * A.data.size());
+		cl::Buffer buffer_A_t(context, CL_MEM_READ_WRITE, sizeof(T) * A_t.data.size());
+		cl::Buffer buffer_X(context, CL_MEM_READ_WRITE, sizeof(T) * X.data.size());
+
+		cl::CommandQueue queue(context, default_device);
+
+		//	compiling the kernel
+
+		cl::Kernel kernel_mat_mat_mul_gpu;
+		cl::Kernel kernel_mat_vec_mul_gpu;
+
+		// checking if the format is double or float and we compile the appropriate kernel 
+
+
+		kernel_mat_mat_mul_gpu = cl::Kernel(program, "mat_mat_mul_gpu_sp");
+		kernel_mat_vec_mul_gpu = cl::Kernel(program, "mat_vec_mul_gpu_fp32");
+
+		//	writting tot the buffers A.data.size(), A.data.data()
+		queue.enqueueWriteBuffer(buffer_A, CL_TRUE, 0, sizeof(T) * A.data.size(), A.data.data());
+		queue.enqueueWriteBuffer(buffer_A_t, CL_TRUE, 0, sizeof(T) * A_t.data.size(), A_t.data.data());
+		queue.enqueueWriteBuffer(buffer_X, CL_TRUE, 0, sizeof(T) * X.data.size(), X.data.data());
+
+		//	setting the kernel arguments
+		kernel_mat_mat_mul_gpu.setArg(0, (int)A.rows);
+		kernel_mat_mat_mul_gpu.setArg(1, (int)A.cols);
+		kernel_mat_mat_mul_gpu.setArg(2, buffer_A);
+		kernel_mat_mat_mul_gpu.setArg(3, buffer_A_t);
+		kernel_mat_mat_mul_gpu.setArg(4, buffer_X);
+
+		//	we'll use multiples of 32 for the sizes of the workgroups 
+		//	this matches the characteristics of a lot of the hardware avaialble
+		const int TS = 32;
+		const int WPT = 8;
+
+		//launching the kernel in execution
+		queue.enqueueNDRangeKernel(kernel_mat_mat_mul_gpu, cl::NullRange, cl::NDRange((int)A.rows, (int)A.rows / WPT), cl::NDRange(TS, TS / WPT));
+
+		//	reading back the result
+		queue.enqueueReadBuffer(buffer_X, CL_TRUE, 0, sizeof(T) * X.data.size(), X.data.data());
+
+		queue.finish();
+
+
+		Matrix<T> b_k(A.getRows()), aux(A.getRows()), b_k1(A.getRows());
+		T norm_b_k1 = 0.0f, eig = 0.0f;
+
+		b_k.fill(1.0f);
+
+		cl::Buffer buffer_b_k(context, CL_MEM_READ_WRITE, sizeof(T) * b_k.data.size());
+		cl::Buffer buffer_b_k_res(context, CL_MEM_READ_WRITE, sizeof(T) * b_k.data.size());
+		//queue.enqueueWriteBuffer(buffer_b_k, CL_TRUE, 0, sizeof(T) * b_k.data.size(), b_k.data.data());
+		queue.finish();
+
+		for (unsigned int i = 0; i < 10; i++)
+		{
+			queue.enqueueWriteBuffer(buffer_b_k, CL_TRUE, 0, sizeof(T) * b_k.data.size(), b_k.data.data());
+			kernel_mat_vec_mul_gpu.setArg(0, buffer_X);
+			kernel_mat_vec_mul_gpu.setArg(1, buffer_b_k);
+			kernel_mat_vec_mul_gpu.setArg(2, buffer_b_k_res);
+			kernel_mat_vec_mul_gpu.setArg(3, (int)A.rows);
+			kernel_mat_vec_mul_gpu.setArg(4, (int)A.rows);
+			queue.enqueueNDRangeKernel(kernel_mat_vec_mul_gpu, cl::NullRange, cl::NDRange((int)A.rows));
+			queue.enqueueReadBuffer(buffer_b_k_res, CL_TRUE, 0, sizeof(float) * b_k.data.size(), b_k.data.data());
+
+			b_k1 = b_k;
+			norm_b_k1 = b_k1.norm();
+			aux = b_k1;
+			b_k1 = b_k1 * (1 / norm_b_k1);
+			b_k = b_k1;
+			b_k1 = aux;
+		}
+
+		aux = b_k;
+
+		queue.enqueueWriteBuffer(buffer_b_k, CL_TRUE, 0, sizeof(T) * b_k.data.size(), b_k.data.data());
+		kernel_mat_vec_mul_gpu.setArg(0, buffer_X);
+		kernel_mat_vec_mul_gpu.setArg(1, buffer_b_k);
+		kernel_mat_vec_mul_gpu.setArg(2, buffer_b_k_res);
+		kernel_mat_vec_mul_gpu.setArg(3, (int)A.rows);
+		kernel_mat_vec_mul_gpu.setArg(4, (int)A.rows);
+		queue.enqueueNDRangeKernel(kernel_mat_vec_mul_gpu, cl::NullRange, cl::NDRange((int)A.rows));
+		queue.enqueueReadBuffer(buffer_b_k_res, CL_TRUE, 0, sizeof(float) * b_k.data.size(), b_k.data.data());
+
+		b_k = b_k.getTransposedMatrix() * aux;
+		aux = aux.getTransposedMatrix() * aux;
+
+		return  b_k.at(0, 0) / aux.at(0, 0);
+}
+
 
 template <class T>
 T SparseRepSol<T>::power_method() {
@@ -77,10 +191,10 @@ Matrix<T> SparseRepSol<T>::shrink(Matrix<T> M, T threshold) {
 }
 
 template <class T>
-Matrix<T> SparseRepSol<T>::solve_ADM(uint64_t iterations, T tau, T beta) {
+std::vector<T> SparseRepSol<T>::solve_ADM(uint64_t iterations, T tau, T beta) {
 
 	if (!is_max_eig_set) {
-		max_eig = power_method();
+		power_method();
 		is_max_eig_set = true;
 	}
 
@@ -98,8 +212,161 @@ Matrix<T> SparseRepSol<T>::solve_ADM(uint64_t iterations, T tau, T beta) {
 		y_k = y_k - (A * x_k - b) * (gamma * beta);
 	}
 
-	return x_k; 
+	sol = x_k.data;
+	return sol;
 }
+
+template <class T>
+std::vector<T> SparseRepSol<T>::solve_ADM_gpu(uint64_t iterations, T beta, T tau) {
+	//	checking if the maximum singular value has been set otherwise we'll compute it
+	if (!is_max_eig_set)
+	{
+		max_eig = power_method_gpu();
+		//max_eig = 274;
+	}
+	int n = A.cols;
+	int m = A.rows;
+	//	gamma is required to be less than 2 in order to ensure convergence
+	//	note that if the maximum singular value are too big this can no longer be true
+	//	and you'd need to change tau and beta
+	float gamma = 1.99f - (tau * max_eig);
+
+	std::vector<T> aux1(n), aux2(n), aux3(n), aux_b(m), aux_x(n), b1(m), x1(n);
+	std::vector<T> y(m);
+	std::vector<T> r(m);
+	A_t = A_t * tau;
+	b1 = b.data;
+
+	//	Implemeting the following ADM algorithm :
+	//	Input: τ, β, γ dictionary A, measurement b, x = 0, y = 0
+	//	While not converge
+	//	x(k)←shrink(x(k)-τA*(Ax(k)-b-y(k)/β),τ/β)
+	//	y(k+1)←y(k)-γβ(Ax(k+1)-b)
+	//	end while
+	//	Output: x(k)
+
+	std::vector<cl::Platform> all_platforms;
+	cl::Platform::get(&all_platforms);
+	cl::Platform default_platform = all_platforms[0];
+	std::vector<cl::Device> all_devices;
+	default_platform.getDevices(CL_DEVICE_TYPE_GPU, &all_devices);
+	cl::Device default_device = all_devices[0];
+	//std::cout << all_devices[0].getInfo<CL_DEVICE_NAME>() << std::endl;
+	cl::Context context(default_device);
+	std::ifstream src("gpu_kernels.cl");
+	std::string str((std::istreambuf_iterator<char>(src)), std::istreambuf_iterator<char>());
+	cl::Program::Sources sources;
+	sources.push_back({ str.c_str(),str.length() });
+	cl::Program program(context, sources);
+	program.build({ default_device });
+	cl::CommandQueue queue(context, default_device);
+	cl::Kernel mat_vec_mul_gpu_fp32;
+	cl::Kernel vec_sub_gpu_sp;
+	cl::Kernel vec_scalar_gpu_sp;
+	cl::Kernel shrink_gpu_sp;
+	mat_vec_mul_gpu_fp32 = cl::Kernel(program, "mat_vec_mul_gpu_fp32");
+	vec_sub_gpu_sp = cl::Kernel(program, "vec_sub_gpu_sp");
+	vec_scalar_gpu_sp = cl::Kernel(program, "vec_scalar_gpu_sp");
+	shrink_gpu_sp = cl::Kernel(program, "shrink_gpu_sp");
+
+	std::vector<float> A_flat(n * m);
+	std::vector<float> A_t_flat(n * m);
+	std::vector<float> aux1_flat(n), res_flat(m);
+
+	A_flat = A.data;
+	A_t_flat = A_t.data;
+
+	cl::Buffer buffer_A(context, CL_MEM_READ_ONLY, sizeof(float) * A_flat.size());
+	cl::Buffer buffer_A_t(context, CL_MEM_READ_ONLY, sizeof(float) * A_t_flat.size());
+	cl::Buffer buffer_aux1(context, CL_MEM_READ_WRITE, sizeof(float) * aux1_flat.size());
+	cl::Buffer buffer_x(context, CL_MEM_READ_WRITE, sizeof(float) * n);
+	cl::Buffer buffer_sol(context, CL_MEM_READ_WRITE, sizeof(float) * n);
+	cl::Buffer buffer_aux_y(context, CL_MEM_READ_WRITE, sizeof(float) * m);
+	cl::Buffer buffer_y(context, CL_MEM_READ_WRITE, sizeof(float) * m);
+	cl::Buffer buffer_res_x(context, CL_MEM_READ_WRITE, sizeof(float) * m);
+	cl::Buffer buffer_res_b(context, CL_MEM_READ_WRITE, sizeof(float) * n);
+	cl::Buffer buffer_b(context, CL_MEM_READ_WRITE, sizeof(float) * m);
+	queue.enqueueWriteBuffer(buffer_A, CL_TRUE, 0, sizeof(float) * A_flat.size(), A_flat.data());
+	queue.enqueueWriteBuffer(buffer_A_t, CL_TRUE, 0, sizeof(float) * A_t_flat.size(), A_t_flat.data());
+	queue.enqueueWriteBuffer(buffer_b, CL_TRUE, 0, sizeof(float) * b1.size(), b1.data());
+
+	queue.finish();
+
+	for (int i = 0; i <= iterations; i++)
+	{
+		mat_vec_mul_gpu_fp32.setArg(0, buffer_A);
+		mat_vec_mul_gpu_fp32.setArg(1, buffer_aux1);
+		mat_vec_mul_gpu_fp32.setArg(2, buffer_res_x);
+		mat_vec_mul_gpu_fp32.setArg(3, m);
+		mat_vec_mul_gpu_fp32.setArg(4, n);
+		queue.enqueueNDRangeKernel(mat_vec_mul_gpu_fp32, cl::NullRange, cl::NDRange(m));
+		std::vector<T> auxt(n);
+		queue.enqueueReadBuffer(buffer_sol, CL_TRUE, 0, sizeof(float) * auxt.size(), auxt.data());
+
+		vec_sub_gpu_sp.setArg(0, buffer_res_x);
+		vec_sub_gpu_sp.setArg(1, buffer_b);
+		queue.enqueueNDRangeKernel(vec_sub_gpu_sp, cl::NullRange, cl::NDRange(m));
+		std::vector<T> auxb(m);
+		queue.enqueueReadBuffer(buffer_res_x, CL_TRUE, 0, sizeof(float) * auxb.size(), auxb.data());
+
+		vec_scalar_gpu_sp.setArg(0, buffer_aux_y);
+		vec_scalar_gpu_sp.setArg(1, (1 / beta));
+		queue.enqueueNDRangeKernel(vec_scalar_gpu_sp, cl::NullRange, cl::NDRange(m));
+
+		vec_sub_gpu_sp.setArg(0, buffer_res_x);
+		vec_sub_gpu_sp.setArg(1, buffer_aux_y);
+		queue.enqueueNDRangeKernel(vec_sub_gpu_sp, cl::NullRange, cl::NDRange(m));
+
+		mat_vec_mul_gpu_fp32.setArg(0, buffer_A_t);
+		mat_vec_mul_gpu_fp32.setArg(1, buffer_res_x);
+		mat_vec_mul_gpu_fp32.setArg(2, buffer_res_b);
+		mat_vec_mul_gpu_fp32.setArg(3, n);
+		mat_vec_mul_gpu_fp32.setArg(4, m);
+		queue.enqueueNDRangeKernel(mat_vec_mul_gpu_fp32, cl::NullRange, cl::NDRange(n));
+
+		queue.enqueueCopyBuffer(buffer_sol, buffer_x, 0, 0, sizeof(T) * x1.size());
+
+		vec_sub_gpu_sp.setArg(0, buffer_x);
+		vec_sub_gpu_sp.setArg(1, buffer_res_b);
+		queue.enqueueNDRangeKernel(vec_sub_gpu_sp, cl::NullRange, cl::NDRange(n));
+
+		shrink_gpu_sp.setArg(0, buffer_x);
+		shrink_gpu_sp.setArg(1, (tau / beta));
+		queue.enqueueNDRangeKernel(shrink_gpu_sp, cl::NullRange, cl::NDRange(n));
+
+		queue.enqueueCopyBuffer(buffer_x, buffer_sol, 0, 0, sizeof(T) * n);
+		queue.enqueueCopyBuffer(buffer_x, buffer_aux1, 0, 0, sizeof(T) * x1.size());
+
+		mat_vec_mul_gpu_fp32.setArg(0, buffer_A);
+		mat_vec_mul_gpu_fp32.setArg(1, buffer_aux1);
+		mat_vec_mul_gpu_fp32.setArg(2, buffer_res_x);
+		mat_vec_mul_gpu_fp32.setArg(3, m);
+		mat_vec_mul_gpu_fp32.setArg(4, n);
+		queue.enqueueNDRangeKernel(mat_vec_mul_gpu_fp32, cl::NullRange, cl::NDRange(m));
+
+		vec_sub_gpu_sp.setArg(0, buffer_res_x);
+		vec_sub_gpu_sp.setArg(1, buffer_b);
+		queue.enqueueNDRangeKernel(vec_sub_gpu_sp, cl::NullRange, cl::NDRange(m));
+
+		vec_scalar_gpu_sp.setArg(0, buffer_res_x);
+		vec_scalar_gpu_sp.setArg(1, (gamma * beta));
+		queue.enqueueNDRangeKernel(vec_scalar_gpu_sp, cl::NullRange, cl::NDRange(m));
+
+		vec_sub_gpu_sp.setArg(0, buffer_y);
+		vec_sub_gpu_sp.setArg(1, buffer_res_x);
+		queue.enqueueNDRangeKernel(vec_sub_gpu_sp, cl::NullRange, cl::NDRange(m));
+
+		queue.enqueueCopyBuffer(buffer_y, buffer_aux_y, 0, 0, sizeof(T) * m);
+	}
+
+	queue.enqueueReadBuffer(buffer_sol, CL_TRUE, 0, sizeof(float) * x1.size(), x1.data());
+	queue.finish();
+
+	sol = x1;
+
+	return sol;
+}
+
 
 template <class T>
 Matrix<T> SparseRepSol<T>::solve_PALM(uint64_t iterations_outter_loop, uint64_t iterations_inner_loop, T zeta) {

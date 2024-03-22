@@ -1,6 +1,8 @@
 #ifndef _MATRIX_H_
 #define _MATRIX_H_
 
+#define CL_USE_DEPRECATED_OPENCL_2_0_APIS
+#include <CL/cl.hpp>
 #include <iostream>
 #include <vector>
 #include <random>
@@ -49,12 +51,22 @@ public:
     void transposeMatrix();
     // Function to display the matrix
     void display() const;
+    void display_sparse() const;
     void fill_rand();
     void fill_randSparse(uint64_t sparsity);
+    void fill_randSparseBinary(uint64_t sparsity);
     void fill(T a);
     void abs();
-    void fillRandom(std::vector<T>& data, T lower_bound = -1, T upper_bound = 1);
-    void fillRandomSparse(std::vector<T>& data, uint64_t sparsity, T lower_bound = -1, T upper_bound = 1);
+    void fillRandom(std::vector<T>& data, T lower_bound = 0, T upper_bound = 1);
+    void fillRandomSparse(std::vector<T>& data, uint64_t sparsity, T lower_bound = -2, T upper_bound = 2);
+    void fillRandomSparseBinary(std::vector<T>& data, uint64_t sparsity, T lower_bound = -2, T upper_bound = 2);
+    void initialize_opencl_context();
+    void update_gpu_buffer();
+
+    cl::Context default_context;
+    cl::Device default_device;
+    cl::Buffer buffer_data;
+
 };
 
 #endif

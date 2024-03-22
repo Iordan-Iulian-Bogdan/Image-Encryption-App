@@ -94,10 +94,12 @@ void multiplyMatrices(const std::vector<float>& A, const std::vector<float>& B, 
     size_t rows_A, size_t cols_A, size_t cols_B) {
 
     // Use scalar instructions for the remaining elements
-    for (size_t i = 0; i < rows_A; ++i) {
-        for (size_t j = 0; j < cols_B; ++j) {
+    int numThreads = omp_get_max_threads();
+    #pragma omp parallel for num_threads(numThreads) schedule(dynamic)
+    for (int64_t i = 0; i < rows_A; ++i) {
+        for (int64_t j = 0; j < cols_B; ++j) {
             float sum = 0.0f;
-            for (size_t k = 0; k < cols_A; ++k) {
+            for (int64_t k = 0; k < cols_A; ++k) {
                 sum += A[i * cols_A + k] * B[k * cols_B + j];
             }
             result[i * cols_B + j] += sum;
