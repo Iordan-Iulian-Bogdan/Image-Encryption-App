@@ -7,55 +7,38 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/photo.hpp>
 #include "sparse_representations_solver.h"
 #include "sparse_representations_solver.cpp"
-#include<tuple>
+#include <tuple>
 
-void mat_vec_mul_gpu(tuple <cl::Context, cl::CommandQueue, cl::Program> context, cl::Buffer &buffer_mat, cl::Buffer &buffer_vec, cl::Buffer &buffer_res, int rows, int cols)
+void generateIDCT(vector<vector<float>> &IDCT)
 {
-	cl::Kernel matrixVectorMultiply;
-	matrixVectorMultiply = cl::Kernel(get<2>(context), "mat_vec_mul_gpu_fp32");
-	matrixVectorMultiply.setArg(0, buffer_mat);
-	matrixVectorMultiply.setArg(1, buffer_vec);
-	matrixVectorMultiply.setArg(2, buffer_res);
-	matrixVectorMultiply.setArg(3, (int)rows);
-	matrixVectorMultiply.setArg(4, (int)cols);
-	get<1>(context).enqueueNDRangeKernel(matrixVectorMultiply, cl::NullRange, cl::NDRange((int)(rows)));
-	get<1>(context).finish();
+	vector<float> ek(IDCT.size());
+	vector<float> psi(IDCT.size());
+
+	int numThreads = omp_get_max_threads();
+	#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
+	for (int i = 0; i < IDCT.size(); i++)
+	{
+		vec_fill(ek, 0.0f);
+		ek[i] = 1.0f;
+		cv::idct(ek, psi, 0);
+		IDCT[i] = psi;
+	}
 }
 
-tuple <cl::Context, cl::CommandQueue, cl::Program> creat_opencl_context()
+void recostruct(cv::Mat& img, cv::Mat& out)
 {
-	std::vector<cl::Platform> all_platforms;
-	cl::Platform::get(&all_platforms);
-	cl::Platform default_platform = all_platforms[0];
-	std::vector<cl::Device> all_devices;
-	default_platform.getDevices(CL_DEVICE_TYPE_GPU, &all_devices);
-	cl::Device default_device = all_devices[0];
-	cl::Context context(default_device);
-	std::ifstream src("gpu_kernels.cl");
-	std::string str((std::istreambuf_iterator<char>(src)), std::istreambuf_iterator<char>());
-	cl::Program::Sources sources;
-	sources.push_back({ str.c_str(),str.length() });
-	cl::Program program(context, sources);
-	program.build({ default_device });
-	cl::CommandQueue queue(context, default_device);
-
-	tuple <cl::Context, cl::CommandQueue, cl::Program> cl_context(context, queue, program);
-
-	return { context, queue, program };
-}
-
-void recostruct(cv::Mat& img, cv::Mat& out, float p)
-{
-	tuple <cl::Context, cl::CommandQueue, cl::Program> cl_context = creat_opencl_context();
+	std::tuple <cl::Context, cl::CommandQueue, cl::Program> cl_context = creat_opencl_context();
 
 	int width = img.size[1];
 	int height = img.size[0];
 	size_t n = width * height;
-	size_t m = n - 64;// int(n * p);
+	size_t m = n;
 	int T = 12;
 	int k = 0;
+	vector<float> res(m);
 	vector<float> ek(n);
 	vector<float> psi(n);
 	vector<float> x(n);
@@ -66,13 +49,21 @@ void recostruct(cv::Mat& img, cv::Mat& out, float p)
 	vector<float> Phi_alt(m * n);
 	vector<vector<float>> Theta(m, vector<float>(n));
 	vector<vector<float>> Theta_t(n, vector<float>(m));
+	vector<vector<float>> IDCT(n, vector<float>(n));
+
+	cl::Buffer buffer_A(get<0>(cl_context), CL_MEM_READ_WRITE, sizeof(float) * Phi_alt.size());
+	cl::Buffer buffer_vec(get<0>(cl_context), CL_MEM_READ_WRITE, sizeof(float) * x_aux.size());
+	cl::Buffer buffer_res(get<0>(cl_context), CL_MEM_READ_WRITE, sizeof(float) * res.size());
+	cl::Buffer buffer_theta(get<0>(cl_context), CL_MEM_READ_WRITE, sizeof(float) * m * n);
+
+	vec_rand(Phi_alt);
+	std::get<1>(cl_context).enqueueWriteBuffer(buffer_A, CL_TRUE, 0, sizeof(float) * Phi_alt.size(), Phi_alt.data());
+	std::get<1>(cl_context).finish();
+	Phi_alt = vector<float>();
 
 	std::random_device e;
 	std::default_random_engine generator(e());
-	generator.seed(std::chrono::system_clock::now().time_since_epoch().count());
-	static std::uniform_real_distribution<> dis(0, n - 1);
-
-	//vec_fill(Phi_alt, 0.0f);
+	generator.seed(1);
 
 	cv::Mat floatImg;
 	cv::Mat reconstructedImg;
@@ -90,53 +81,58 @@ void recostruct(cv::Mat& img, cv::Mat& out, float p)
 			x[k++] = floatImg.at<float>(j, i);
 		}
 	}
-	vec_rand(Phi_alt);
 
 	x_aux = x;
 
-	vector<float> res(m);
-	size_t t = 32;
-	size_t m1 = 32;
 	float sum = 0.0f;
-
-	cl::Buffer buffer_A(get<0>(cl_context), CL_MEM_READ_ONLY, sizeof(float) * Phi_alt.size());
-	cl::Buffer buffer_vec(get<0>(cl_context), CL_MEM_READ_WRITE, sizeof(float) * x_aux.size());
-	cl::Buffer buffer_res(get<0>(cl_context), CL_MEM_READ_WRITE, sizeof(float) * res.size());
-
-	get<1>(cl_context).enqueueWriteBuffer(buffer_A, CL_TRUE, 0, sizeof(float) * Phi_alt.size(), Phi_alt.data());
-	get<1>(cl_context).enqueueWriteBuffer(buffer_vec, CL_TRUE, 0, sizeof(float) * x_aux.size(), x_aux.data());
-	get<1>(cl_context).enqueueWriteBuffer(buffer_res, CL_TRUE, 0, sizeof(float) * res.size(), res.data());
-	get<1>(cl_context).finish();
-
-	mat_vec_mul_gpu(cl_context, buffer_A, buffer_vec, buffer_res, m, n);
-
-	get<1>(cl_context).enqueueReadBuffer(buffer_res, CL_TRUE, 0, sizeof(float) * res.size(), res.data());
-	get<1>(cl_context).finish();
-	x_aux = res;
-
-	y = x_aux;
 
 	for (int i = 0; i < n; i++)
 	{
 		vec_fill(ek, 0.0f);
 		ek[i] = 1.0f;
 		cv::idct(ek, psi, 0);
+		IDCT[i] = psi;
+	}
 
-		get<1>(cl_context).enqueueWriteBuffer(buffer_vec, CL_TRUE, 0, sizeof(float) * psi.size(), psi.data());
+	for (int i = 0; i < n; i++)
+	{
+		psi = IDCT[i];
+
+		std::get<1>(cl_context).enqueueWriteBuffer(buffer_vec, CL_TRUE, 0, sizeof(float) * psi.size(), psi.data());
 		mat_vec_mul_gpu(cl_context, buffer_A, buffer_vec, buffer_res, m, n);
-		get<1>(cl_context).enqueueReadBuffer(buffer_res, CL_TRUE, 0, sizeof(float) * res.size(), res.data());
-		get<1>(cl_context).finish();
+		std::get<1>(cl_context).enqueueReadBuffer(buffer_res, CL_TRUE, 0, sizeof(float) * res.size(), res.data());
+		std::get<1>(cl_context).finish();
 		psi = res;
 
 		Theta_t[i] = psi;
 	}
 
+	IDCT = vector<vector<float>>();
 	mat_transpose(Theta_t, Theta, T);
+	Theta_t = vector<vector<float>>();
 
 	Matrix<float> Theta_alt(m, n), y_alt(m);
 	vector<float> Theta_alt_flat(n * m);
+
 	flatten(Theta, Theta_alt_flat, 16);
+	Theta = vector<vector<float>>();
+
+	Theta_alt.rows = m;
+	Theta_alt.cols = n;
 	Theta_alt.data = Theta_alt_flat;
+	Theta_alt_flat = vector<float>();
+
+	std::get<1>(cl_context).enqueueWriteBuffer(buffer_vec, CL_TRUE, 0, sizeof(float) * x_aux.size(), x_aux.data());
+	std::get<1>(cl_context).enqueueWriteBuffer(buffer_res, CL_TRUE, 0, sizeof(float) * res.size(), res.data());
+	std::get<1>(cl_context).finish();
+
+	mat_vec_mul_gpu(cl_context, buffer_A, buffer_vec, buffer_res, m, n);
+
+	std::get<1>(cl_context).enqueueReadBuffer(buffer_res, CL_TRUE, 0, sizeof(float) * m, res.data());
+	std::get<1>(cl_context).finish();
+
+	y = res;
+
 	y_alt.data = y;
 
 	SparseRepSol<float> data(Theta_alt, y_alt);
@@ -171,8 +167,6 @@ void recostruct(cv::Mat& img, cv::Mat& out, float p)
 
 	cv::Mat dst;
 	reconstructedImg.convertTo(dst, CV_8U);
-
-
 	out = dst;
 }
 
@@ -180,7 +174,7 @@ void recostruct(cv::Mat& img, cv::Mat& out, float p)
 int main()
 {
 	int k = 0;
-	cv::Mat img = cv::imread("C:/images/gpu.png", cv::IMREAD_GRAYSCALE);
+	cv::Mat img = cv::imread("C:/images/gpu.jpg", cv::IMREAD_COLOR);
 
 	if (img.empty())
 	{
@@ -188,29 +182,34 @@ int main()
 		// don't let the execution continue, else imshow() will crash.
 	}
 
-	float p = 2;
+	cv::Mat channels[3];
+	cv::Mat out_channels[3];
 
-	cv::Mat channel_1;
-	cv::Mat channel_2;
-	cv::Mat channel_3;
-	cv::Mat out_1;
-	cv::Mat out_2;
-	cv::Mat out_3;
-	cv::Mat org_1;
-	cv::Mat org_2;
-	cv::Mat org_3;
+	cv::Mat out;
+
 	cv::Mat reconstructed_img;
 	cv::Mat original_img;
 
+	cv::split(img, channels);
 
 	high_resolution_clock::time_point t1 = high_resolution_clock::now();
-	recostruct(img, out_1, p);
+
+	int numThreads = 3;
+	//#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
+	for (int i = 0; i < 3; i++) {
+		recostruct(channels[i], out_channels[i]);
+	}
+;
 	high_resolution_clock::time_point t2 = high_resolution_clock::now();
 	float solve_time = duration_cast<milliseconds>(t2 - t1).count();
 	cout << solve_time << endl;
 
-	cv::imwrite("C:/images/gpu_out.png", out_1);
-	imshow("Display window", out_1);
+	cv::merge(out_channels, 3, out);
+
+	cv::fastNlMeansDenoising(out, out, 2);
+
+	cv::imwrite("C:/images/gpu_out.png", out);
+	imshow("Display window", out);
 	k = cv::waitKey(0);
 
 	return 1;

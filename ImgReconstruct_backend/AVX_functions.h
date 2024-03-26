@@ -19,8 +19,8 @@ inline void vec_rand(vector<float>& vec, int numThreads = 1)
 {
 	std::random_device e;
 	std::default_random_engine generator(e());
-	generator.seed(std::chrono::system_clock::now().time_since_epoch().count());
-	static std::uniform_real_distribution<> dis(-1, 1);
+	generator.seed(1);
+	static std::uniform_real_distribution<> dis(-2, 2);
 
 	#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
 	for (int64_t i = 0; i < vec.size(); i++)
@@ -457,7 +457,7 @@ inline void mat_mat_mul_avx(vector<vector<float>>& mat1, vector<vector<float>>& 
 inline void mat_mat_mul_avx(vector<vector<double>>& mat1, vector<vector<double>>& mat2, vector<vector<double>>& res, uint32_t T)
 {
 	//	multiple dot products will be computed in parallel, the dot products themselves are computed sequentially however  
-#pragma omp parallel for num_threads(T) schedule(dynamic) 
+    #pragma omp parallel for num_threads(T) schedule(dynamic) 
 	for (int i = 0; i < mat1.size(); i++)
 	{
 		for (int j = 0; j < mat1.size(); j++)
@@ -467,7 +467,6 @@ inline void mat_mat_mul_avx(vector<vector<double>>& mat1, vector<vector<double>>
 	}
 }
 
-// computes the transpose of mat and writes it to mat_t 
 void mat_transpose(vector<vector<float>>& mat, vector<vector<float>>& mat_t, uint32_t T)
 {
 #pragma omp parallel for num_threads(T) schedule(dynamic)

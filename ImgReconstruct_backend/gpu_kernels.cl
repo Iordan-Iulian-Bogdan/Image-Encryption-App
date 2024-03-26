@@ -306,3 +306,20 @@ __kernel void mat_vec_mul_gpu_fp32(
         result[globalId] = sum;
     }
 }
+
+__kernel void matrixMultiplication1(__global float* A,
+                                   __global float* B,
+                                   __global float* C,
+                                   int rowsA,
+                                   int colsA,
+                                   int colsB) {
+    int globalRow = get_global_id(0);
+    int globalCol = get_global_id(1);
+
+    float sum = 0.0f;
+    for (int k = 0; k < colsA; ++k) {
+        sum += A[globalRow * colsA + k] * B[k * colsB + globalCol];
+    }
+
+    C[globalRow * colsB + globalCol] = sum;
+}

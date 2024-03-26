@@ -1,7 +1,7 @@
 // TestTemp.cpp
 #include "Matrix.h"
-#include "matrix_arithmetic_ops.h"
 #include <cmath>
+
 template <class T>
 Matrix<T>::Matrix(size_t rows, size_t cols) : rows(rows), cols(cols) {
     initialize_opencl_context();
@@ -173,9 +173,10 @@ Matrix<T> Matrix<T>::getTransposedMatrix() {
 
     // Create a temporary vector to store the transposed matrix
     std::vector<T> transposedMatrix(data.size());
-
-    for (size_t i = 0; i < rows; ++i) {
-        for (size_t j = 0; j < cols; ++j) {
+    int numThreads = omp_get_max_threads();
+    #pragma omp parallel for num_threads(numThreads) schedule(dynamic)
+    for (int64_t i = 0; i < rows; ++i) {
+        for (int64_t j = 0; j < cols; ++j) {
             transposedMatrix[j * rows + i] = data[i * cols + j];
         }
     }
@@ -196,8 +197,10 @@ void Matrix<T>::transposeMatrix() {
     std::vector<T> transposedMatrix(data.size());
 
     // Transpose the matrix
-    for (size_t i = 0; i < rows; ++i) {
-        for (size_t j = 0; j < cols; ++j) {
+    int numThreads = omp_get_max_threads();
+    #pragma omp parallel for num_threads(numThreads) schedule(dynamic)
+    for (int64_t i = 0; i < rows; ++i) {
+        for (int64_t j = 0; j < cols; ++j) {
             transposedMatrix[j * rows + i] = data[i * cols + j];
         }
     }
