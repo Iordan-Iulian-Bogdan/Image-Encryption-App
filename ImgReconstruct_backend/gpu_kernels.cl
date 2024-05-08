@@ -2,36 +2,67 @@
 #define WPT 8   
 #define RTS (TS/WPT)
 
-void kernel norm_dp(global double* x, global double* norm, int n)
-{
-    int i = 0;
+__kernel void mat_vec_mul_gpu_fp32(
+    __global float* matrix,
+    __global float* vector,
+    __global float* result,
+    int rows,
+    int cols
+) {
 
-    for (i = 0; i < n; i++)
-    {
-        norm[0] += x[i] * x[i];
+    //printf("mat_vec_mul_gpu_fp32");
+    // Get the global ID
+    int globalId = get_global_id(0);
+
+    // Ensure that the global ID is within the bounds of the result vector
+    if (globalId < rows) {
+        // Initialize the result for the current row
+        float sum = 0.0f;
+
+        // Perform the matrix-vector multiplication
+        for (int i = 0; i < cols; ++i) {
+            sum += matrix[globalId * cols + i] * vector[i];
+        }
+
+        // Store the result in the output vector
+        result[globalId] = sum;
+        //printf("%f", result[globalId]);
+        //result[globalId] = 128.0f;
+
+        //if (get_global_id(0) == 0)
+            //printf("mat mul");
     }
-
-    norm[0] = sqrt(norm[0]);
 }
 
-void kernel norm_sp(global float* x, global float* norm, int n)
-{
-    int i = 0;
-
-    for (i = 0; i < n; i++)
-    {
-        norm[0] += x[i] * x[i];
+__kernel void vectorAdd(__global const float* A, __global const float* B, __global float* C, const int length) {
+    int i = get_global_id(0);
+    if (i < length) {
+        C[i] = A[i] + B[i];
     }
-
-    norm[0] = sqrt(norm[0]);
 }
 
-void kernel vec_scalar_gpu_sp(global float* x, float a)
+__kernel void vectorSub(__global const float* A, __global const float* B, __global float* C, const int length) {
+    int i = get_global_id(0);
+    if (i < length) {
+        C[i] = A[i] - B[i];
+    }
+}
+
+__kernel void kernel vec_scalar_gpu_sp_device(__global global float* x, float a, int size)
+{
+    for (int i = 0; i < size; ++i) {
+        x[i] *= a;
+    }
+}
+
+__kernel void kernel vec_scalar_gpu_sp(__global global float* x, float a)
 {
     x[get_global_id(0)] *= a;
+    //if (get_global_id(0) == 0)
+       // printf("vec scalar");
 }
 
-void kernel shrink_gpu_sp(global float* x, float threshold)
+__kernel void kernel shrink_gpu_sp(__global global float* x, float threshold)
 {
 
     const int id = get_global_id(0);
@@ -43,138 +74,155 @@ void kernel shrink_gpu_sp(global float* x, float threshold)
 
     if ((sign(x[id]) * x[id]) < 1.175e-38)
         x[id] = 0.0f;
+    //if (get_global_id(0) == 0)
+        //printf("shrink");
 
 }
 
-void kernel mul(global const float* mat, global const float* vec, global float* res, int m, int n)
+__kernel void kernel shrink_gpu_sp_device(__global global float* x, float threshold, int size)
 {
-    int id = get_global_id(0);
-    float sum = 0.0f;
+    for (int i = 0; i < size; ++i) {
+        int id = i;
 
-    for (int i = 0; i < n; i++)
-    {
-        sum += mat[id + m * i] * vec[i];
+        float aux;
+        aux = sign(x[id]) * x[id] - threshold;
+
+        x[id] = sign(x[id]) * fmax(aux, 0.0f);
+
+        if ((sign(x[id]) * x[id]) < 1.175e-38)
+            x[id] = 0.0f;
     }
-    res[get_global_id(0)] = sum;
-
 }
 
-
-void kernel mat_vec_mul_gpu_sp(global const float* mat, global const float* vec, global float* res, local float* aux, int m, int n)
-{
-    float sum = 0.0f;
-
-    //	computing a partial dot product
-    for (int k = get_global_id(1); k < n; k += get_global_size(1))
-    {
-        sum += mat[get_global_id(0) + m * k] * vec[k];
-    }
-
-
-    const int rows = get_local_size(0);
-    int cols = get_local_size(1);
-    const int i = get_local_id(0);
-    const int j = get_local_id(1);
-    aux[i + rows * j] = sum;
-
-    //	synchronizing all threads within the same workgroup
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    //	performing the reduction to sum up all the partial dot products
-    while (cols > 1)
-    {
-        cols = cols / 2;
-        if (j < cols)
-            aux[i + rows * j] += aux[i + rows * (j + cols)];
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
-
-    // 	writing the final answer
-    if (j == 0)
-        res[get_global_id(0)] = aux[i];
-}
-
-void kernel vec_sub_gpu_sp(global float* vec1, global const float* vec2)
+__kernel void kernel vec_sub_gpu_sp(__global global float* vec1, __global global const float* vec2)
 {
     const int id = get_global_id(0);
     vec1[id] = vec1[id] - vec2[id];
+    //if (get_global_id(0) == 0)
+        //printf("vec sub");
 }
 
-void kernel vec_add_gpu_sp(global float* vec1, global const float* vec2)
+__kernel void kernel vec_sub_gpu_sp_device(__global float* vec1, __global float* vec2, int size)
 {
-    const int id = get_global_id(0);
-    vec1[id] = vec1[id] + vec2[id];
+    for (int i = 0; i < size; ++i) {
+        vec1[i] = vec1[i] - vec2[i];
+    }
 }
 
-void kernel vec_scalar_gpu_dp(global double* x, double a)
+__kernel void norm_sp(__global float* x, __global float* norm, int n)
 {
-    x[get_global_id(0)] *= a;
-}
+    int i = 0;
 
-void kernel shrink_gpu_dp(global double* x, double threshold)
-{
-
-    const int id = get_global_id(0);
-
-    local double aux;
-    aux = sign(x[id]) * x[id] - threshold;
-
-    x[id] = sign(x[id]) * fmax(aux, (double)(0.0f));
-
-    if ((sign(x[id]) * x[id]) < 1.175e-38)
-        x[id] = 0.0f;
-
-}
-
-void kernel mat_vec_mul_gpu_dp(global const double* mat, global const double* vec, global double* res, local double* aux, int m, int n)
-{
-
-    double sum = 0.0f;
-
-    //	computing a partial dot product
-    for (int k = get_global_id(1); k < n; k += get_global_size(1))
+    for (i = 0; i < n; i++)
     {
-        sum += mat[get_global_id(0) + m * k] * vec[k];
+        norm[0] += x[i] * x[i];
     }
 
+    norm[0] = sqrt(norm[0]);
+}
 
-    const int rows = get_local_size(0);
-    int cols = get_local_size(1);
-    const int i = get_local_id(0);
-    const int j = get_local_id(1);
-    aux[i + rows * j] = sum;
+__kernel void matrixMultiplication(__global float* A,
+                                   __global float* B,
+                                   __global float* C,
+                                   int rowsA,
+                                   int colsA,
+                                   int colsB) {
+    int globalRow = get_global_id(0);
+    int globalCol = get_global_id(1);
 
-    //	synchronizing all threads within the same workgroup
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    //	performing the reduction to sum up all the partial dot products
-    while (cols > 1)
-    {
-        cols = cols / 2;
-        if (j < cols)
-            aux[i + rows * j] += aux[i + rows * (j + cols)];
-        barrier(CLK_LOCAL_MEM_FENCE);
+    float sum = 0.0f;
+    for (int k = 0; k < colsA; ++k) {
+        sum += A[globalRow * colsA + k] * B[k * colsB + globalCol];
     }
 
-    // 	writing the final answer
-    if (j == 0)
-        res[get_global_id(0)] = aux[i];
-
+    C[globalRow * colsB + globalCol] = sum;
 }
 
-void kernel vec_sub_gpu_dp(global double* vec1, global const double* vec2)
+float dot_product_device(const float* A, const float* B, int size) {
+    float result = 0.0;
+    for (int i = 0; i < size; i++) {
+        result += A[i] * B[i];
+    }
+    return result;
+}
+
+float norm_sp_device(float* x, int n)
 {
-    const int id = get_global_id(0);
-    vec1[id] = vec1[id] - vec2[id];
+    int i = 0;
+    float norm = 0.0f;
+
+    for (i = 0; i < n; i++)
+    {
+        norm += x[i] * x[i];
+    }
+
+    return sqrt(norm);
 }
 
-void kernel vec_add_gpu_dp(global double* vec1, global const double* vec2)
+__kernel void copy_gpu(__global float* dest, __global float* src, int n)
 {
-    const int id = get_global_id(0);
-    vec1[id] = vec1[id] + vec2[id];
+    for (unsigned int k = 0; k < n; k++)
+        dest[k] = src[k];
 }
 
-// Increased the amount of work-per-thread by a factor WPT
+__kernel void helper_func1(__global float* b_k, __global float* b_k_res, __global float* b_k1, __global float* aux, int rows)
+{
+    float norm_b_k1 = 0.0f;
+
+    copy_gpu(b_k, b_k_res, rows);
+    copy_gpu(b_k1, b_k, rows);
+
+    norm_b_k1 = norm_sp_device(b_k1, rows);
+
+    copy_gpu(aux, b_k1, rows);
+
+    for (unsigned int k = 0; k < rows; k++)
+        b_k1[k] = b_k1[k] * (1 / norm_b_k1);
+
+    copy_gpu(b_k, b_k1, rows);
+    copy_gpu(b_k1, aux, rows);
+    copy_gpu(aux, b_k, rows);
+}
+
+__kernel void helper_func2(__global float* X, __global float* b_k, __global float* b_k_res, __global float* aux, __global float* b_k1, __global float* max_eig, int rows)
+{
+    copy_gpu(b_k, b_k_res, rows);
+
+    float res1 = dot_product_device(b_k, aux, rows);
+    float res2 = dot_product_device(aux, aux, rows);
+
+    max_eig[0] = res1 / res2;
+    printf("%f", res1);
+}
+
+__kernel void power_method( __global float* X, 
+                            __global float* b_k, 
+                            __global float* b_k_res, 
+                            __global float* b_k1, 
+                            __global float* aux,  
+                            __global float* max_eig, 
+                            int rows, 
+                            int cols)
+{
+
+    clk_event_t event_mat_vec_mul, event_helper_func1;
+    clk_event_t marker_event;
+
+    for (unsigned int k = 0; k < rows; k++)
+        b_k[k] = 1.0f;
+
+    for (unsigned int i = 0; i < 10; i++)
+    {
+        enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(rows, 1), 0, NULL, &event_mat_vec_mul, ^{ mat_vec_mul_gpu_fp32(X, b_k, b_k_res, rows, cols); });
+        enqueue_marker(get_default_queue(), 1, &event_mat_vec_mul, &marker_event);
+        enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(1, 1), 1, &marker_event, NULL, ^{ helper_func1(b_k, b_k_res, b_k1, aux, rows); });
+    }
+
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(rows, 1), 0, &marker_event, NULL, ^{ mat_vec_mul_gpu_fp32(X, b_k, b_k_res, rows, cols); });
+    enqueue_marker(get_default_queue(), 1, &event_mat_vec_mul, &marker_event);
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(1, 1), 1, &marker_event, NULL, ^{ helper_func2(X, b_k1, b_k_res, aux, b_k1, max_eig, rows); });
+}
+
 __kernel void mat_mat_mul_gpu_sp(const int M, const int K,
     const __global float* A,
     const __global float* B,
@@ -228,98 +276,114 @@ __kernel void mat_mat_mul_gpu_sp(const int M, const int K,
     }
 }
 
-// Increased the amount of work-per-thread by a factor WPT
-__kernel void mat_mat_mul_gpu_dp(const int M, const int K,
-    const __global double* A,
-    const __global double* B,
-    __global double* C) {
+__kernel void transpose(__global float* input,
+                        __global float* output,
+                        const int width,
+                        const int height) {
+    int global_row = get_global_id(0);
+    int global_col = get_global_id(1);
 
-    // Thread identifiers
-    const int row = get_local_id(0); // Local row ID (max: TS)
-    const int col = get_local_id(1); // Local col ID (max: TS/WPT == RTS)
-    const int globalRow = TS * get_group_id(0) + row; // Row ID of C (0..M)
-    const int globalCol = TS * get_group_id(1) + col; // Col ID of C (0..N)
-
-    // Local memory to fit a tile of TS*TS elements of A and B
-    __local double Asub[TS][TS];
-    __local double Bsub[TS][TS];
-
-    // Initialise the accumulation registers
-    double acc[WPT];
-    for (int w = 0; w < WPT; w++) {
-        acc[w] = 0.0f;
-    }
-
-    // Loop over all tiles
-    const int numTiles = K / TS;
-    for (int t = 0; t < numTiles; t++) {
-
-        // Load one tile of A and B into local memory
-        for (int w = 0; w < WPT; w++) {
-            const int tiledRow = TS * t + row;
-            const int tiledCol = TS * t + col;
-            Asub[col + w * RTS][row] = A[(tiledCol + w * RTS) * M + globalRow];
-            Bsub[col + w * RTS][row] = B[(globalCol + w * RTS) * K + tiledRow];
-        }
-
-        // Synchronise to make sure the tile is loaded
-        barrier(CLK_LOCAL_MEM_FENCE);
-
-        // Perform the computation for a single tile
-        for (int k = 0; k < TS; k++) {
-            for (int w = 0; w < WPT; w++) {
-                acc[w] += Asub[k][row] * Bsub[col + w * RTS][k];
-            }
-        }
-
-        // Synchronise before loading the next tile
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
-
-    // Store the final results in C
-    for (int w = 0; w < WPT; w++) {
-        C[(globalCol + w * RTS) * M + globalRow] = acc[w];
+    if (global_row < height && global_col < width) {
+        int index_in = global_row * width + global_col;
+        int index_out = global_col * height + global_row;
+        output[index_out] = input[index_in];
     }
 }
 
-__kernel void mat_vec_mul_gpu_fp32(
-    __global float* matrix,
-    __global float* vector,
-    __global float* result,
-    const int rows,
-    const int cols
-) {
-    // Get the global ID
-    int globalId = get_global_id(0);
+__kernel void ADM_helper_func1(__global float* buffer_res_x, __global float* buffer_b, __global float* buffer_aux_y, float beta, int rows){
+    int m = rows;
+    clk_event_t event_1, event_2;
 
-    // Ensure that the global ID is within the bounds of the result vector
-    if (globalId < rows) {
-        // Initialize the result for the current row
-        float sum = 0.0f;
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m, 1), 0, NULL, &event_1, ^ { vec_sub_gpu_sp(buffer_res_x, buffer_b); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m, 1), 1, &event_1, &event_2, ^ { vec_scalar_gpu_sp(buffer_aux_y, (1 / beta)); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m, 1), 1, &event_2, NULL, ^ { vec_sub_gpu_sp(buffer_res_x, buffer_aux_y); });
 
-        // Perform the matrix-vector multiplication
-        for (int i = 0; i < cols; ++i) {
-            sum += matrix[globalId * cols + i] * vector[i];
-        }
+    printf("%f", buffer_b[0]);
+    printf("%f", buffer_b[1]);
+    printf("%f", buffer_b[2]);
+    printf("%f", buffer_b[3]);
 
-        // Store the result in the output vector
-        result[globalId] = sum;
-    }
+    //vec_sub_gpu_sp_device(buffer_res_x, buffer_b, m);
+    //vec_scalar_gpu_sp_device(buffer_aux_y, (1 / beta), m);
+    //vec_sub_gpu_sp_device(buffer_res_x, buffer_aux_y, m);
 }
 
-__kernel void matrixMultiplication1(__global float* A,
-                                   __global float* B,
-                                   __global float* C,
-                                   int rowsA,
-                                   int colsA,
-                                   int colsB) {
-    int globalRow = get_global_id(0);
-    int globalCol = get_global_id(1);
+__kernel void ADM_helper_func2(__global float* buffer_x, __global float* buffer_sol, __global float* buffer_res_b, __global float* buffer_aux1, float beta, float tau, int cols){
+    int n = cols;
+    clk_event_t event_1, event_2;
 
-    float sum = 0.0f;
-    for (int k = 0; k < colsA; ++k) {
-        sum += A[globalRow * colsA + k] * B[k * colsB + globalCol];
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(1, 1), 1, &event_2, &event_1, ^ { copy_gpu(buffer_x, buffer_sol, n); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(n, 1), 1, &event_1, &event_2, ^ { vec_sub_gpu_sp(buffer_x, buffer_res_b); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(n, 1), 1, &event_2, &event_1, ^ { shrink_gpu_sp(buffer_x, (tau / beta)); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(1, 1), 1, &event_1, &event_2, ^ { copy_gpu(buffer_sol, buffer_x, n); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(1, 1), 1, &event_2, &event_1, ^ { copy_gpu(buffer_aux1, buffer_x, n); });
+
+    copy_gpu(buffer_x, buffer_sol, n);
+    vec_sub_gpu_sp_device(buffer_x, buffer_res_b, n);
+    shrink_gpu_sp_device(buffer_x, (tau / beta), n);
+    copy_gpu(buffer_sol, buffer_x, n);
+    copy_gpu(buffer_aux1, buffer_x, n);
+}
+
+__kernel void ADM_helper_func3(__global float* buffer_res_x, __global float* buffer_y, __global float* buffer_aux_y, __global float* buffer_b, float beta, float gamma, int rows) {
+    int m = rows;
+    clk_event_t event_1, event_2;
+
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m, 1), 1, &event_1, &event_2, ^ { vec_sub_gpu_sp(buffer_res_x, buffer_b); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m, 1), 1, &event_2, &event_1, ^ { vec_scalar_gpu_sp(buffer_res_x, (gamma * beta)); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m, 1), 1, &event_1, &event_2, ^ { vec_sub_gpu_sp(buffer_y, buffer_res_x); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(1, 1), 1, &event_2, &event_1, ^ { copy_gpu(buffer_aux_y, buffer_y, m); });
+
+    vec_sub_gpu_sp_device(buffer_res_x, buffer_b, m);
+    vec_scalar_gpu_sp_device(buffer_res_x, (gamma * beta), m);
+    vec_sub_gpu_sp_device(buffer_y, buffer_res_x, m);
+    copy_gpu(buffer_aux_y, buffer_y, m);
+}
+
+__kernel void sync(__global int* buffer_count)
+{
+    //buffer_count[0]++;
+    //printf("sync %d", buffer_count[0]);
+}
+
+__kernel void ADM(__global float* buffer_A, __global float* buffer_A_t, __global float* buffer_b,
+                  __global float* buffer_res, __global float* buffer_y, __global float* buffer_x, __global float* buffer_res2, __global int* buffer_count,
+                  float max_eig, float beta, float tau, float gamma,
+                  int rows, int cols, int iterations) {
+    
+    int m = rows;
+    int n = cols;
+    int err = 0;
+
+    clk_event_t event_1, event_2;
+    
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 0, NULL, &event_2, ^ { mat_vec_mul_gpu_fp32(buffer_A, buffer_x, buffer_res, m, n); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_2, &event_1, ^ { vec_sub_gpu_sp(buffer_res, buffer_b); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_1, &event_2, ^ { vec_scalar_gpu_sp(buffer_y, (1 / beta)); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_2, &event_1, ^ { vec_sub_gpu_sp(buffer_res, buffer_y); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(n), 1, &event_1, &event_2, ^ { mat_vec_mul_gpu_fp32(buffer_A_t, buffer_res, buffer_res2, n, m); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(n), 1, &event_2, &event_1, ^ { vec_sub_gpu_sp(buffer_x, buffer_res2); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(n), 1, &event_1, &event_2, ^ { shrink_gpu_sp(buffer_x, (tau / beta)); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_2, &event_1, ^ { mat_vec_mul_gpu_fp32(buffer_A, buffer_x, buffer_res2, m, n); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_1, &event_2, ^ { vec_sub_gpu_sp(buffer_res2, buffer_b); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_2, &event_1, ^ { vec_scalar_gpu_sp(buffer_res2, (gamma * beta)); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_1, &event_2, ^ { vec_scalar_gpu_sp(buffer_y, (1 / (1 / beta))); });
+    enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_2, &event_1, ^ { vec_sub_gpu_sp(buffer_y, buffer_res2); });
+
+    for (int i = 0; i <= iterations; i++) {
+        enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_1, &event_2, ^ { mat_vec_mul_gpu_fp32(buffer_A, buffer_x, buffer_res, m, n); });
+        enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_2, &event_1, ^ { vec_sub_gpu_sp(buffer_res, buffer_b); });
+        enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_1, &event_2, ^ { vec_scalar_gpu_sp(buffer_y, (1 / beta)); });
+        enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_2, &event_1, ^ { vec_sub_gpu_sp(buffer_res, buffer_y); });
+        enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(n), 1, &event_1, &event_2, ^ { mat_vec_mul_gpu_fp32(buffer_A_t, buffer_res, buffer_res2, n, m); });
+        enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(n), 1, &event_2, &event_1, ^ { vec_sub_gpu_sp(buffer_x, buffer_res2); });
+        enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(n), 1, &event_1, &event_2, ^ { shrink_gpu_sp(buffer_x, (tau / beta)); });
+        enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_2, &event_1, ^ { mat_vec_mul_gpu_fp32(buffer_A, buffer_x, buffer_res2, m, n); });    
+        enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_1, &event_2, ^ { vec_sub_gpu_sp(buffer_res2, buffer_b); });
+        enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_2, &event_1, ^ { vec_scalar_gpu_sp(buffer_res2, (gamma * beta)); });
+        enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_1, &event_2, ^ { vec_scalar_gpu_sp(buffer_y, (1 / (1 / beta))); });
+        enqueue_kernel(get_default_queue(), CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange_1D(m), 1, &event_2, &event_1, ^ { vec_sub_gpu_sp(buffer_y, buffer_res2); });
+        //printf("err %d, %d", err, i);
     }
 
-    C[globalRow * colsB + globalCol] = sum;
 }

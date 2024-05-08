@@ -1,8 +1,5 @@
 #ifndef _MATRIX_H_
 #define _MATRIX_H_
-
-#define CL_USE_DEPRECATED_OPENCL_2_0_APIS
-#include <CL/cl.hpp>
 #include <iostream>
 #include <vector>
 #include <random>
@@ -62,11 +59,7 @@ public:
     void fillRandomSparse(std::vector<T>& data, uint64_t sparsity, T lower_bound = -2, T upper_bound = 2);
     void fillRandomSparseBinary(std::vector<T>& data, uint64_t sparsity, T lower_bound = -2, T upper_bound = 2);
     void initialize_opencl_context();
-    void update_gpu_buffer();
 
-    cl::Context default_context;
-    cl::Device default_device;
-    cl::Buffer buffer_data;
 
 };
 

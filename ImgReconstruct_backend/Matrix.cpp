@@ -4,7 +4,6 @@
 
 template <class T>
 Matrix<T>::Matrix(size_t rows, size_t cols) : rows(rows), cols(cols) {
-    initialize_opencl_context();
     // Initialize the matrix with zeros
     data.resize(rows * cols, T());
     if (cols == 1)
@@ -15,7 +14,6 @@ Matrix<T>::Matrix(size_t rows, size_t cols) : rows(rows), cols(cols) {
 
 template <class T>
 Matrix<T>::Matrix(std::vector <T> data, size_t rows, size_t cols) : rows(rows), cols(cols), data(data) {
-    initialize_opencl_context();
     // Initialize the matrix with zeros
     data.resize(rows * cols, T());
     if (cols == 1)
@@ -142,9 +140,8 @@ Matrix<T> Matrix<T>::operator*(const Matrix& other) const {
         multiplyMatrices(data, other.data, result.data, rows, cols, other.cols);
     }
     else {
-        (other.cols < 16) ? multiplyMatrices(data, other.data, result.data, rows, cols, other.cols) :
-            multiplyMatrices(data, other.data, result.data, rows, cols, other.cols);
-
+        multiplyMatricesAVX512(data, other.data, result.data, rows, cols, other.cols);
+        //multiplyMatrices(data, other.data, result.data, rows, cols, other.cols);
     }
 
     return result;
@@ -276,26 +273,9 @@ void Matrix<T>::abs() {
 
 template <class T>
 void Matrix<T>::initialize_opencl_context() {
-    std::vector<cl::Platform> all_platforms;
-    cl::Platform::get(&all_platforms);
-    cl::Platform default_platform = all_platforms[0];
-    std::vector<cl::Device> all_devices;
-    default_platform.getDevices(CL_DEVICE_TYPE_GPU, &all_devices);
-    cl::Device device = all_devices[0];
-    cl::Context context(device);
-    default_context = context;
-    default_device = device;
+
 }
 
-template <class T>
-void Matrix<T>::update_gpu_buffer() {
-    // cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(float) * data.size());
-    buffer_data = cl::Buffer(default_context, CL_MEM_READ_WRITE, sizeof(float) * data.size());
-    cl::CommandQueue queue(default_context, default_device);
-    queue.enqueueWriteBuffer(*buffer_data, CL_TRUE, 0, sizeof(T) * data.size(), data.data());
-    queue.enqueueReadBuffer(*buffer_data, CL_TRUE, 0, sizeof(T) * data.size(), data.data());
-    queue.finish();
-}
 
 template <class T>
 void Matrix<T>::fillRandom(std::vector<T>& data, T lower_bound, T upper_bound) {

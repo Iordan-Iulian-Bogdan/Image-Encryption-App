@@ -1,6 +1,5 @@
 #pragma once
-#define CL_USE_DEPRECATED_OPENCL_2_0_APIS
-#include <CL/cl.hpp>
+#include <CL/cl.h>
 #include <vector>
 #include <tuple>
 #include <iostream>
@@ -14,31 +13,9 @@ void multiplyVectorScalarAVX512(std::vector<float>& vec, float scalar);
 void multiplyVectorScalar(std::vector<float>& vec, float scalar);
 
 //opencl functions
-std::tuple <cl::Context, cl::CommandQueue, cl::Program> creat_opencl_context();
-void mat_vec_mul_gpu(std::tuple <cl::Context, 
-						cl::CommandQueue, 
-						cl::Program> context,
-						cl::Buffer& buffer_mat, 
-						cl::Buffer& buffer_vec, 
-						cl::Buffer& buffer_res, 
-						int rows, 
-						int cols);
 
-void mat_mat_mul_gpu(std::tuple <cl::Context,
-	cl::CommandQueue,
-	cl::Program> context,
-	cl::Buffer& buffer_mat1,
-	cl::Buffer& buffer_mat2,
-	cl::Buffer& buffer_res,
-	int rows,
-	int cols);
 
-void mat_mat_mul_gpu2(std::tuple <cl::Context,
-	cl::CommandQueue,
-	cl::Program> context,
-	cl::Buffer& buffer_mat1,
-	cl::Buffer& buffer_mat2,
-	cl::Buffer& buffer_res,
-	int rows_mat1,
-	int cols_mat1,
-	int cols_mat2);
+void runVectorAddKernel(cl_context context, cl_command_queue queue, cl_kernel kernel,
+    cl_mem bufferA, cl_mem bufferB, cl_mem bufferC, int length);
+
+void display_opencl_info();

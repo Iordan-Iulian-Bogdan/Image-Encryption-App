@@ -15,18 +15,20 @@
 using namespace std::chrono;
 using namespace std;
 
-inline void vec_rand(vector<float>& vec, int numThreads = 1)
+inline void vec_rand(vector<float>& vec, int numThreads, float seed)
 {
 	std::random_device e;
 	std::default_random_engine generator(e());
-	generator.seed(1);
+	generator.seed(seed);
 	static std::uniform_real_distribution<> dis(-2, 2);
-
+	
 	#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
 	for (int64_t i = 0; i < vec.size(); i++)
 	{
 		vec[i] = dis(generator);
 	}
+
+	std::cout << std::endl << seed << std::endl;
 }
 
 inline void vec_rand(vector<double>& vec)
@@ -46,7 +48,7 @@ void mat_rand(vector<vector<float>>& mat, uint32_t T)
 #pragma omp parallel for num_threads(T) schedule(dynamic)
 	for (int32_t i = 0; i < mat.size(); i++)
 	{
-		vec_rand(mat[i]);
+		vec_rand(mat[i], 16, 1);
 	}
 }
 
