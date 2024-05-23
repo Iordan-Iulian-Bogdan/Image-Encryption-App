@@ -22,8 +22,24 @@ inline void vec_rand(vector<float>& vec, int numThreads, float seed)
 	generator.seed(seed);
 	static std::uniform_real_distribution<> dis(-2, 2);
 	
-	#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
+	//#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
 	for (int64_t i = 0; i < vec.size(); i++)
+	{
+		vec[i] = dis(generator);
+	}
+
+	std::cout << std::endl << seed << std::endl;
+}
+
+inline void vec_rand(vector<float>& vec, int numThreads, unsigned int seed, int start, int end)
+{
+	std::random_device e;
+	std::default_random_engine generator(e());
+	generator.seed(seed);
+	static std::uniform_real_distribution<> dis(-2, 2);
+
+	//#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
+	for (int64_t i = start; i < end; i++)
 	{
 		vec[i] = dis(generator);
 	}
