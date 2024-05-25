@@ -24,6 +24,8 @@ void createOpenCLcontext(openCLContext& cl_data) {
 	clBuildProgram(cl_data.program, 1, &cl_data.device, options, NULL, NULL);
 }
 
+// decrypts the data by solving the 'A * x = b' equation, where 'x' is the unkown decrypted singal and 'b' is the known encrypted signal 
+// uses Alternating Direction Method optimization algorithm
 std::vector <float> ADM_gpu(map<string, cl_mem>& buffers,
 	int A_cols, int A_rows, float max_eig, float beta, float tau, int iterations,
 	openCLContext cl_data, map<string, cl_kernel> kernels, int index1, int index2)
@@ -97,6 +99,7 @@ std::vector <float> ADM_gpu(map<string, cl_mem>& buffers,
 		clSetKernelArg(kernels["shrink_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_x" + std::to_string(index1) + "_" + std::to_string(index2)]);
 		clSetKernelArg(kernels["shrink_gpu_sp"], 1, sizeof(float), &f);
 		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["shrink_gpu_sp"], 1, NULL, globalSize_n, NULL, 0, NULL, NULL);
+		clFinish(cl_data.queue);
 
 		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 0, sizeof(cl_mem), &buffers["buffer_A"]);
 		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 1, sizeof(cl_mem), &buffers["buffer_x" + std::to_string(index1) + "_" + std::to_string(index2)]);
@@ -382,7 +385,7 @@ float generate_dictionary(map<string, cl_mem>& buffers, cl_context context, cl_c
 	return max_eig;
 }
 
-// encrypts a segment of data by multiplying the vectorized image with the encryption matrix
+// encrypts a segment of data by multiplying the vectorized monochromatic image with the encryption matrix
 // stores the encrypted data in the measurments vector
 void encrypt_data(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::vector<float>>& measurments, openCLContext& cl_data, map<string, cl_kernel> kernels, uint32_t tile_size, int index1, int index2)
 {
@@ -398,7 +401,6 @@ void encrypt_data(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::v
 	vector<float> x_aux(n);
 
 	buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * n, NULL, NULL);
-	buffers["buffer_res_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * m, NULL, NULL);
 
 	cv::Mat floatImg;
 	img.convertTo(floatImg, CV_32FC1);
@@ -425,16 +427,18 @@ void encrypt_data(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::v
 
 	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 0, sizeof(cl_mem), &buffers["buffer_phi"]);
 	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 1, sizeof(cl_mem), &buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)]);
-	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 2, sizeof(cl_mem), &buffers["buffer_res_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)]);
+	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 2, sizeof(cl_mem), &buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)]);
 	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 3, sizeof(int), &m);
 	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 4, sizeof(int), &n);
 
 	err = clEnqueueNDRangeKernel(cl_data.queue, kernels["mat_vec_mul_gpu_fp32"], 1, NULL, globalSize, NULL, 0, NULL, NULL);
 
-	clEnqueueReadBuffer(cl_data.queue, buffers["buffer_res_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * res.size(), res.data(), 0, NULL, NULL);
-	buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = buffers["buffer_res_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)];
-
+	clEnqueueReadBuffer(cl_data.queue, buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * res.size(), res.data(), 0, NULL, NULL);
+	// storing the encrypted data
 	measurments["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = res;
+
+	clReleaseMemObject(buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)]);
+	clReleaseMemObject(buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)]);
 
 	clFinish(cl_data.queue);
 }
@@ -464,12 +468,6 @@ void encrypt_image(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::
 	// encrypting the data for each color channel
 	for (int i = 0; i < 3; i++) {
 		encrypt_data(channels[i], buffers, measurments, cl_data, kernels, TILE_SIZE, index, i);
-	}
-
-	for (int i = 0; i < 3; i++) {
-		clReleaseMemObject(buffers["buffer_b" + std::to_string(index) + "_" + std::to_string(i)]);
-		clReleaseMemObject(buffers["buffer_vec_decrypt" + std::to_string(index) + "_" + std::to_string(i)]);
-		clReleaseMemObject(buffers["buffer_res_decrypt" + std::to_string(index) + "_" + std::to_string(i)]);
 	}
 
 	clReleaseCommandQueue(cl_data.queue);
