@@ -1,9 +1,32 @@
 #include "sparseImageEncryption.h"
 #include "AVX_functions.h"
 
+void createOpenCLcontext(openCLContext& cl_data) {
+	clGetPlatformIDs(1, &cl_data.platform, NULL);
+	clGetDeviceIDs(cl_data.platform, CL_DEVICE_TYPE_GPU, 1, &cl_data.device, NULL);
+	cl_data.context = clCreateContext(NULL, 1, &cl_data.device, NULL, NULL, &cl_data.err);
+	cl_queue_properties properties[] = { CL_QUEUE_PROPERTIES, (cl_command_queue_properties)(CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_ON_DEVICE | CL_QUEUE_ON_DEVICE_DEFAULT), 0 };
+
+	cl_data.queue = clCreateCommandQueueWithProperties(cl_data.context, cl_data.device, 0, &cl_data.err);
+
+	cl_data.device_queue = clCreateCommandQueueWithProperties(cl_data.context, cl_data.device, properties, &cl_data.err);
+
+	std::ifstream kernelFile("gpu_kernels.cl");
+
+	if (!kernelFile.is_open()) {
+		std::cerr << "Failed to open kernel file." << std::endl;
+	}
+
+	std::string kernelSource((std::istreambuf_iterator<char>(kernelFile)), std::istreambuf_iterator<char>());
+	const char* sources = kernelSource.data();
+	cl_data.program = clCreateProgramWithSource(cl_data.context, 1, &sources, NULL, &cl_data.err);
+	const char options[] = "-cl-std=CL2.0";
+	clBuildProgram(cl_data.program, 1, &cl_data.device, options, NULL, NULL);
+}
+
 std::vector <float> ADM_gpu(map<string, cl_mem>& buffers,
 	int A_cols, int A_rows, float max_eig, float beta, float tau, int iterations,
-	cl_context context, cl_command_queue queue, map<string, cl_kernel> kernels, cl_device_id device, cl_program program, int index1, int index2)
+	openCLContext cl_data, map<string, cl_kernel> kernels, int index1, int index2)
 {
 	cl_queue_properties properties[] = { CL_QUEUE_PROPERTIES, (cl_command_queue_properties)(CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_ON_DEVICE | CL_QUEUE_ON_DEVICE_DEFAULT), 0 };
 
@@ -19,12 +42,12 @@ std::vector <float> ADM_gpu(map<string, cl_mem>& buffers,
 
 	std::vector<float> x1(n);
 
-	buffers["buffer_res" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * n, NULL, NULL);
-	buffers["buffer_y" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * m, NULL, NULL);
-	buffers["buffer_x" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * n, NULL, NULL);
-	buffers["buffer_res_aux" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * n, NULL, NULL);
-	buffers["buffer_count" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int), NULL, NULL);
-	clFinish(queue);
+	buffers["buffer_res" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * n, NULL, NULL);
+	buffers["buffer_y" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * m, NULL, NULL);
+	buffers["buffer_x" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * n, NULL, NULL);
+	buffers["buffer_res_aux" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * n, NULL, NULL);
+	buffers["buffer_count" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(int), NULL, NULL);
+	clFinish(cl_data.queue);
 
 
 	size_t globalSize_g[1] = { 1 };
@@ -38,80 +61,81 @@ std::vector <float> ADM_gpu(map<string, cl_mem>& buffers,
 		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 2, sizeof(cl_mem), &buffers["buffer_res" + std::to_string(index1) + "_" + std::to_string(index2)]);
 		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 3, sizeof(int), &m);
 		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 4, sizeof(int), &n);
-		err = clEnqueueNDRangeKernel(queue, kernels["mat_vec_mul_gpu_fp32"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(queue);
+		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["mat_vec_mul_gpu_fp32"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
+		clFinish(cl_data.queue);
 
 		clSetKernelArg(kernels["vec_sub_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_res" + std::to_string(index1) + "_" + std::to_string(index2)]);
 		clSetKernelArg(kernels["vec_sub_gpu_sp"], 1, sizeof(cl_mem), &buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		err = clEnqueueNDRangeKernel(queue, kernels["vec_sub_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(queue);
+		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_sub_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
+		clFinish(cl_data.queue);
 
 		f = (1 / beta);
 		clSetKernelArg(kernels["vec_scalar_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_y" + std::to_string(index1) + "_" + std::to_string(index2)]);
 		clSetKernelArg(kernels["vec_scalar_gpu_sp"], 1, sizeof(float), &f);
-		err = clEnqueueNDRangeKernel(queue, kernels["vec_scalar_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(queue);
+		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_scalar_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
+		clFinish(cl_data.queue);
 
 		clSetKernelArg(kernels["vec_sub_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_res" + std::to_string(index1) + "_" + std::to_string(index2)]);
 		clSetKernelArg(kernels["vec_sub_gpu_sp"], 1, sizeof(cl_mem), &buffers["buffer_y" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		err = clEnqueueNDRangeKernel(queue, kernels["vec_sub_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(queue);
+		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_sub_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
+		clFinish(cl_data.queue);
 
 		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 0, sizeof(cl_mem), &buffers["buffer_A_t"]);
 		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 1, sizeof(cl_mem), &buffers["buffer_res" + std::to_string(index1) + "_" + std::to_string(index2)]);
 		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 2, sizeof(cl_mem), &buffers["buffer_res_aux" + std::to_string(index1) + "_" + std::to_string(index2)]);
 		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 3, sizeof(int), &n);
 		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 4, sizeof(int), &m);
-		err = clEnqueueNDRangeKernel(queue, kernels["mat_vec_mul_gpu_fp32"], 1, NULL, globalSize_n, NULL, 0, NULL, NULL);
-		clFinish(queue);
+		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["mat_vec_mul_gpu_fp32"], 1, NULL, globalSize_n, NULL, 0, NULL, NULL);
+		clFinish(cl_data.queue);
 
 		clSetKernelArg(kernels["vec_sub_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_x" + std::to_string(index1) + "_" + std::to_string(index2)]);
 		clSetKernelArg(kernels["vec_sub_gpu_sp"], 1, sizeof(cl_mem), &buffers["buffer_res_aux" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		err = clEnqueueNDRangeKernel(queue, kernels["vec_sub_gpu_sp"], 1, NULL, globalSize_n, NULL, 0, NULL, NULL);
-		clFinish(queue);
+		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_sub_gpu_sp"], 1, NULL, globalSize_n, NULL, 0, NULL, NULL);
+		clFinish(cl_data.queue);
 
 		f = (tau / beta);
 		clSetKernelArg(kernels["shrink_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_x" + std::to_string(index1) + "_" + std::to_string(index2)]);
 		clSetKernelArg(kernels["shrink_gpu_sp"], 1, sizeof(float), &f);
-		err = clEnqueueNDRangeKernel(queue, kernels["shrink_gpu_sp"], 1, NULL, globalSize_n, NULL, 0, NULL, NULL);
+		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["shrink_gpu_sp"], 1, NULL, globalSize_n, NULL, 0, NULL, NULL);
 
 		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 0, sizeof(cl_mem), &buffers["buffer_A"]);
 		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 1, sizeof(cl_mem), &buffers["buffer_x" + std::to_string(index1) + "_" + std::to_string(index2)]);
 		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 2, sizeof(cl_mem), &buffers["buffer_res_aux" + std::to_string(index1) + "_" + std::to_string(index2)]);
 		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 3, sizeof(int), &m);
 		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 4, sizeof(int), &n);
-		err = clEnqueueNDRangeKernel(queue, kernels["mat_vec_mul_gpu_fp32"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(queue);
+		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["mat_vec_mul_gpu_fp32"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
+		clFinish(cl_data.queue);
 
 		clSetKernelArg(kernels["vec_sub_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_res_aux" + std::to_string(index1) + "_" + std::to_string(index2)]);
 		clSetKernelArg(kernels["vec_sub_gpu_sp"], 1, sizeof(cl_mem), &buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		err = clEnqueueNDRangeKernel(queue, kernels["vec_sub_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(queue);
+		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_sub_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
+		clFinish(cl_data.queue);
 
 		f = (gamma * beta);
 		clSetKernelArg(kernels["vec_scalar_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_res_aux" + std::to_string(index1) + "_" + std::to_string(index2)]);
 		clSetKernelArg(kernels["vec_scalar_gpu_sp"], 1, sizeof(float), &f);
-		err = clEnqueueNDRangeKernel(queue, kernels["vec_scalar_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(queue);
+		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_scalar_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
+		clFinish(cl_data.queue);
 
 		f = (1 / (1 / beta));
 		clSetKernelArg(kernels["vec_scalar_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_y" + std::to_string(index1) + "_" + std::to_string(index2)]);
 		clSetKernelArg(kernels["vec_scalar_gpu_sp"], 1, sizeof(float), &f);
-		err = clEnqueueNDRangeKernel(queue, kernels["vec_scalar_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(queue);
+		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_scalar_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
+		clFinish(cl_data.queue);
 
 		clSetKernelArg(kernels["vec_sub_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_y" + std::to_string(index1) + "_" + std::to_string(index2)]);
 		clSetKernelArg(kernels["vec_sub_gpu_sp"], 1, sizeof(cl_mem), &buffers["buffer_res_aux" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		err = clEnqueueNDRangeKernel(queue, kernels["vec_sub_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(queue);
+		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_sub_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
+		clFinish(cl_data.queue);
 	}
 
-	clEnqueueReadBuffer(queue, buffers["buffer_x" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * x1.size(), x1.data(), 0, NULL, NULL);
-	
+	clEnqueueReadBuffer(cl_data.queue, buffers["buffer_x" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * x1.size(), x1.data(), 0, NULL, NULL);
+	clFinish(cl_data.queue);
+
 	return x1;
 }
 
-void decrypt_data(cv::Mat& out, map<string, cl_mem>& buffers, cl_context context, cl_command_queue queue, map<string, cl_kernel> kernels, uint32_t tile_size, cl_device_id device, cl_program program, float max_eig, int index1, int index2, float seed = 1) {
+void decrypt_data(cv::Mat& out, map<string, cl_mem>& buffers, openCLContext cl_data, map<string, cl_kernel> kernels, uint32_t tile_size, float max_eig, int index1, int index2, float seed = 1) {
 	cl_int err;
 
 	cv::Mat img = cv::Mat::zeros(cv::Size(tile_size, tile_size), CV_8U);
@@ -135,7 +159,7 @@ void decrypt_data(cv::Mat& out, map<string, cl_mem>& buffers, cl_context context
 	float tau = 0.000001f;
 	int iterations = 1000;
 
-	vector<float>sol_alt = ADM_gpu(buffers, n, m, max_eig, beta, tau, iterations, context, queue, kernels, device, program, index1, index2);
+	vector<float>sol_alt = ADM_gpu(buffers, n, m, max_eig, beta, tau, iterations, cl_data, kernels, index1, index2);
 
 	s1 = sol_alt;
 	float o = s1[n - 1];
@@ -167,68 +191,45 @@ void decrypt_data(cv::Mat& out, map<string, cl_mem>& buffers, cl_context context
 	out = reconstructedImg;
 }
 
-void decrypt_image(cv::Mat& out, map<string, cl_mem>& buffers, cl_context context, cl_command_queue queue, map<string, cl_kernel> kernels, uint32_t TILE_SIZE, cl_device_id device, cl_program program, float max_eig, int index1) {
+void decrypt_image(cv::Mat& out, map<string, cl_mem>& buffers, uint32_t TILE_SIZE, float max_eig, int index) {
 
-	cv::Mat channels[3];
-	cv::split(out, channels);
-
-	for (int i = 0; i < 3; i++) {
-		decrypt_data(channels[i], buffers, context, queue, kernels, TILE_SIZE, device, program, max_eig, index1, i);
-	}
-
-	cv::merge(channels, 3, out);
-}
-
-void decrypt_image_alt(cv::Mat& out, map<string, cl_mem>& buffers, uint32_t TILE_SIZE, float max_eig, int index) {
-
-	cl_platform_id platform;
-	cl_device_id device;
-	cl_context context;
-	cl_command_queue queue;
-	cl_program program;
-	cl_int err;
-
-	clGetPlatformIDs(1, &platform, NULL);
-	clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, NULL);
-	context = clCreateContext(NULL, 1, &device, NULL, NULL, &err);
-	queue = clCreateCommandQueueWithProperties(context, device, 0, &err);
-
-	std::ifstream kernelFile("gpu_kernels.cl");
-
-	if (!kernelFile.is_open()) {
-		std::cerr << "Failed to open kernel file." << std::endl;
-	}
-
-	std::string kernelSource((std::istreambuf_iterator<char>(kernelFile)), std::istreambuf_iterator<char>());
-	const char* sources = kernelSource.data();
-	program = clCreateProgramWithSource(context, 1, &sources, NULL, &err);
-	const char options[] = "-cl-std=CL2.0";
-	clBuildProgram(program, 1, &device, options, NULL, NULL);
+	// initializing opencl context
+	openCLContext cl_data{ NULL, NULL, NULL, NULL, NULL, NULL, 0 };
+	createOpenCLcontext(cl_data);
 
 	map<string, cl_kernel> kernels;
 
-	kernels["transpose"] = clCreateKernel(program, "transpose", &err);
-	kernels["mat_mat_mul_gpu_sp"] = clCreateKernel(program, "mat_mat_mul_gpu_sp", &err);
-	kernels["power_method"] = clCreateKernel(program, "power_method", &err);
-	kernels["mat_vec_mul_gpu_fp32"] = clCreateKernel(program, "mat_vec_mul_gpu_fp32", &err);
-	kernels["vec_scalar_gpu_sp"] = clCreateKernel(program, "vec_scalar_gpu_sp", &err);
-	kernels["vec_sub_gpu_sp"] = clCreateKernel(program, "vec_sub_gpu_sp", &err);
-	kernels["shrink_gpu_sp"] = clCreateKernel(program, "shrink_gpu_sp", &err);
-	kernels["ADM"] = clCreateKernel(program, "ADM", &err);
+	kernels["transpose"] = clCreateKernel(cl_data.program, "transpose", &cl_data.err);
+	kernels["mat_mat_mul_gpu_sp"] = clCreateKernel(cl_data.program, "mat_mat_mul_gpu_sp", &cl_data.err);
+	kernels["power_method"] = clCreateKernel(cl_data.program, "power_method", &cl_data.err);
+	kernels["mat_vec_mul_gpu_fp32"] = clCreateKernel(cl_data.program, "mat_vec_mul_gpu_fp32", &cl_data.err);
+	kernels["vec_scalar_gpu_sp"] = clCreateKernel(cl_data.program, "vec_scalar_gpu_sp", &cl_data.err);
+	kernels["vec_sub_gpu_sp"] = clCreateKernel(cl_data.program, "vec_sub_gpu_sp", &cl_data.err);
+	kernels["shrink_gpu_sp"] = clCreateKernel(cl_data.program, "shrink_gpu_sp", &cl_data.err);
+	kernels["ADM"] = clCreateKernel(cl_data.program, "ADM", &cl_data.err);
 
 	cv::Mat channels[3];
 	cv::split(out, channels);
 
 	for (int i = 0; i < 3; i++) {
-		decrypt_data(channels[i], buffers, context, queue, kernels, TILE_SIZE, device, program, max_eig, index, i);
+		decrypt_data(channels[i], buffers, cl_data, kernels, TILE_SIZE, max_eig, index, i);
 	}
 
 	cv::merge(channels, 3, out);
 
-	clReleaseCommandQueue(queue);
-	clReleaseContext(context);
-	clReleaseDevice(device);
-	clReleaseProgram(program);
+	clReleaseCommandQueue(cl_data.queue);
+	clReleaseContext(cl_data.context);
+	clReleaseDevice(cl_data.device);
+	clReleaseCommandQueue(cl_data.device_queue);
+	clReleaseProgram(cl_data.program);
+
+	for (int i = 0; i < 3; i++) {
+		clReleaseMemObject(buffers["buffer_res" + std::to_string(index) + "_" + std::to_string(i)]);
+		clReleaseMemObject(buffers["buffer_y" + std::to_string(index) + "_" + std::to_string(i)]);
+		clReleaseMemObject(buffers["buffer_x" + std::to_string(index) + "_" + std::to_string(i)]);
+		clReleaseMemObject(buffers["buffer_res_aux" + std::to_string(index) + "_" + std::to_string(i)]);
+		clReleaseMemObject(buffers["buffer_count" + std::to_string(index) + "_" + std::to_string(i)]);
+	}
 
 	for (auto i = kernels.begin(); i != kernels.end(); i++)
 		clReleaseKernel(i->second);
@@ -381,7 +382,7 @@ float generate_dictionary(map<string, cl_mem>& buffers, cl_context context, cl_c
 	return max_eig;
 }
 
-void encrypt_data(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::vector<float>>& measurments, cl_context context, cl_command_queue queue, map<string, cl_kernel> kernels, uint32_t tile_size, int index1, int index2)
+void encrypt_data(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::vector<float>>& measurments, openCLContext& cl_data, map<string, cl_kernel> kernels, uint32_t tile_size, int index1, int index2)
 {
 	cl_int err;
 
@@ -394,8 +395,8 @@ void encrypt_data(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::v
 	vector<float> x(n);
 	vector<float> x_aux(n);
 
-	buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * n, NULL, NULL);
-	buffers["buffer_res_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * m, NULL, NULL);
+	buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * n, NULL, NULL);
+	buffers["buffer_res_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * m, NULL, NULL);
 
 	cv::Mat floatImg;
 	img.convertTo(floatImg, CV_32FC1);
@@ -414,81 +415,59 @@ void encrypt_data(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::v
 
 	float sum = 0.0f;
 
-	buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * m, NULL, NULL);
-	clFinish(queue);
+	buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * m, NULL, NULL);
 
 	size_t globalSize[1] = { m };
 
-	clEnqueueWriteBuffer(queue, buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * x_aux.size(), x_aux.data(), 0, NULL, NULL);
+	clEnqueueWriteBuffer(cl_data.queue, buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * x_aux.size(), x_aux.data(), 0, NULL, NULL);
 
-	clFinish(queue);
 	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 0, sizeof(cl_mem), &buffers["buffer_phi"]);
 	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 1, sizeof(cl_mem), &buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)]);
 	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 2, sizeof(cl_mem), &buffers["buffer_res_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)]);
 	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 3, sizeof(int), &m);
 	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 4, sizeof(int), &n);
 
-	err = clEnqueueNDRangeKernel(queue, kernels["mat_vec_mul_gpu_fp32"], 1, NULL, globalSize, NULL, 0, NULL, NULL);
+	err = clEnqueueNDRangeKernel(cl_data.queue, kernels["mat_vec_mul_gpu_fp32"], 1, NULL, globalSize, NULL, 0, NULL, NULL);
 
-	clEnqueueReadBuffer(queue, buffers["buffer_res_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * res.size(), res.data(), 0, NULL, NULL);
+	clEnqueueReadBuffer(cl_data.queue, buffers["buffer_res_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * res.size(), res.data(), 0, NULL, NULL);
 	buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = buffers["buffer_res_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)];
 
 	measurments["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = res;
+	clReleaseMemObject(buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)]);
+	clReleaseMemObject(buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)]);
+	clReleaseMemObject(buffers["buffer_res_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)]);
+	clFinish(cl_data.queue);
 }
 
-void encrypt_image_alt(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::vector<float>>& measurments, uint32_t TILE_SIZE, int index) {
+void encrypt_image(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::vector<float>>& measurments, uint32_t TILE_SIZE, int index) {
 
-	cl_platform_id platform;
-	cl_device_id device;
-	cl_context context;
-	cl_command_queue queue;
-	cl_program program;
-	cl_int err;
-
-	clGetPlatformIDs(1, &platform, NULL);
-	clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, NULL);
-	context = clCreateContext(NULL, 1, &device, NULL, NULL, &err);
-	cl_queue_properties properties[] = { CL_QUEUE_PROPERTIES, (cl_command_queue_properties)(CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_ON_DEVICE | CL_QUEUE_ON_DEVICE_DEFAULT), 0 };
-
-	queue = clCreateCommandQueueWithProperties(context, device, 0, &err);
-
-	cl_command_queue device_queue = clCreateCommandQueueWithProperties(context, device, properties, &err);
-
-	std::ifstream kernelFile("gpu_kernels.cl");
-
-	if (!kernelFile.is_open()) {
-		std::cerr << "Failed to open kernel file." << std::endl;
-	}
-
-	std::string kernelSource((std::istreambuf_iterator<char>(kernelFile)), std::istreambuf_iterator<char>());
-	const char* sources = kernelSource.data();
-	program = clCreateProgramWithSource(context, 1, &sources, NULL, &err);
-	const char options[] = "-cl-std=CL2.0";
-	clBuildProgram(program, 1, &device, options, NULL, NULL);
+	// initializing opencl context
+	openCLContext cl_data{ NULL, NULL, NULL, NULL, NULL, NULL, 0 };
+	createOpenCLcontext(cl_data);
 
 	map<string, cl_kernel> kernels;
 
-	kernels["transpose"] = clCreateKernel(program, "transpose", &err);
-	kernels["mat_mat_mul_gpu_sp"] = clCreateKernel(program, "mat_mat_mul_gpu_sp", &err);
-	kernels["power_method"] = clCreateKernel(program, "power_method", &err);
-	kernels["mat_vec_mul_gpu_fp32"] = clCreateKernel(program, "mat_vec_mul_gpu_fp32", &err);
-	kernels["vec_scalar_gpu_sp"] = clCreateKernel(program, "vec_scalar_gpu_sp", &err);
-	kernels["vec_sub_gpu_sp"] = clCreateKernel(program, "vec_sub_gpu_sp", &err);
-	kernels["shrink_gpu_sp"] = clCreateKernel(program, "shrink_gpu_sp", &err);
-	kernels["ADM"] = clCreateKernel(program, "ADM", &err);
+	kernels["transpose"] = clCreateKernel(cl_data.program, "transpose", &cl_data.err);
+	kernels["mat_mat_mul_gpu_sp"] = clCreateKernel(cl_data.program, "mat_mat_mul_gpu_sp", &cl_data.err);
+	kernels["power_method"] = clCreateKernel(cl_data.program, "power_method", &cl_data.err);
+	kernels["mat_vec_mul_gpu_fp32"] = clCreateKernel(cl_data.program, "mat_vec_mul_gpu_fp32", &cl_data.err);
+	kernels["vec_scalar_gpu_sp"] = clCreateKernel(cl_data.program, "vec_scalar_gpu_sp", &cl_data.err);
+	kernels["vec_sub_gpu_sp"] = clCreateKernel(cl_data.program, "vec_sub_gpu_sp", &cl_data.err);
+	kernels["shrink_gpu_sp"] = clCreateKernel(cl_data.program, "shrink_gpu_sp", &cl_data.err);
+	kernels["ADM"] = clCreateKernel(cl_data.program, "ADM", &cl_data.err);
 
 	cv::Mat channels[3];
 	cv::split(img, channels);
 
 	for (int i = 0; i < 3; i++) {
-		encrypt_data(channels[i], buffers, measurments, context, queue, kernels, TILE_SIZE, index, i);
+		encrypt_data(channels[i], buffers, measurments, cl_data, kernels, TILE_SIZE, index, i);
 	}
 
-	clReleaseCommandQueue(queue);
-	clReleaseCommandQueue(device_queue);
-	clReleaseContext(context);
-	clReleaseDevice(device);
-	clReleaseProgram(program);
+	clReleaseCommandQueue(cl_data.queue);
+	clReleaseCommandQueue(cl_data.device_queue);
+	clReleaseContext(cl_data.context);
+	clReleaseDevice(cl_data.device);
+	clReleaseProgram(cl_data.program);
 
 	for (auto i = kernels.begin(); i != kernels.end(); i++)
 		clReleaseKernel(i->second);
@@ -571,32 +550,10 @@ vector<unsigned int> passord_to_seeds(string& password) {
 	return seeds;
 }
 
-void createOpenCLcontext(openCLContext& cl_data) {
-	clGetPlatformIDs(1, &cl_data.platform, NULL);
-	clGetDeviceIDs(cl_data.platform, CL_DEVICE_TYPE_GPU, 1, &cl_data.device, NULL);
-	cl_data.context = clCreateContext(NULL, 1, &cl_data.device, NULL, NULL, &cl_data.err);
-	cl_queue_properties properties[] = { CL_QUEUE_PROPERTIES, (cl_command_queue_properties)(CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_ON_DEVICE | CL_QUEUE_ON_DEVICE_DEFAULT), 0 };
-
-	cl_data.queue = clCreateCommandQueueWithProperties(cl_data.context, cl_data.device, 0, &cl_data.err);
-
-	cl_data.device_queue = clCreateCommandQueueWithProperties(cl_data.context, cl_data.device, properties, &cl_data.err);
-
-	std::ifstream kernelFile("gpu_kernels.cl");
-
-	if (!kernelFile.is_open()) {
-		std::cerr << "Failed to open kernel file." << std::endl;
-	}
-
-	std::string kernelSource((std::istreambuf_iterator<char>(kernelFile)), std::istreambuf_iterator<char>());
-	const char* sources = kernelSource.data();
-	cl_data.program = clCreateProgramWithSource(cl_data.context, 1, &sources, NULL, &cl_data.err);
-	const char options[] = "-cl-std=CL2.0";
-	clBuildProgram(cl_data.program, 1, &cl_data.device, options, NULL, NULL);
-}
-
-encryptionImage encryptImage(cv::Mat img, /*image to be encrypted*/
-							int TILE_SIZE, /*size of tiles in which the image is broken up and processed, larger tiles may provide better quality at the cost of memory and speed*/
-							string passphrase /*passphare used to generate the encryption matrix*/) {
+encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
+							int TILE_SIZE, /* size of tiles in which the image is broken up and processed, larger tiles may provide better quality at the cost of memory and speed */
+							string passphrase, /* passphare used to generate the encryption matrix */
+							int threads /* number of tiles to be processed simultaneously */ ) {
 
 	try {
 		bool isImgEmpty = img.empty();
@@ -635,6 +592,7 @@ encryptionImage encryptImage(cv::Mat img, /*image to be encrypted*/
 	int N = processed_width / TILE_SIZE;
 	int M = processed_height / TILE_SIZE;
 
+	// initializing opencl context
 	openCLContext cl_data{NULL, NULL, NULL, NULL, NULL, NULL, 0};
 	createOpenCLcontext(cl_data);
 
@@ -643,7 +601,7 @@ encryptionImage encryptImage(cv::Mat img, /*image to be encrypted*/
 	map<string, cl_kernel> kernels;
 	map<string, cl_mem> buffers;
 	map<string, std::vector<float>> measurments;
-
+	
 	kernels["transpose"] = clCreateKernel(cl_data.program, "transpose", &cl_data.err);
 	kernels["mat_mat_mul_gpu_sp"] = clCreateKernel(cl_data.program, "mat_mat_mul_gpu_sp", &cl_data.err);
 	kernels["power_method"] = clCreateKernel(cl_data.program, "power_method", &cl_data.err);
@@ -662,17 +620,14 @@ encryptionImage encryptImage(cv::Mat img, /*image to be encrypted*/
 	cv::Mat original_img;
 
 	std::vector<cv::Mat> array_of_images = splitImage(img, N, M);
-	std::vector<cv::Mat> array_of_images_out = splitImage(img, N, M);
-
-	char seed[4];
 
 	std::vector<unsigned int> seeds = passord_to_seeds(passphrase);
 
 	generate_decryption_matrix(buffers, cl_data.context, cl_data.queue, kernels, TILE_SIZE, cl_data.device, cl_data.program, seeds);
 
-	#pragma omp parallel for num_threads(4) schedule(dynamic)
+	#pragma omp parallel for num_threads(threads) schedule(dynamic)
 	for (int i = 0; i < array_of_images.size(); i++) {
-		encrypt_image_alt(array_of_images[i], buffers, measurments, TILE_SIZE, i);
+		encrypt_image(array_of_images[i], buffers, measurments, TILE_SIZE, i);
 	}
 
 	std::vector<float> data_array;
@@ -685,10 +640,21 @@ encryptionImage encryptImage(cv::Mat img, /*image to be encrypted*/
 
 	encryptionImage img_encrypted{ TILE_SIZE, original_width, original_height, processed_width, processed_height , data_array };
 
+	clReleaseMemObject(buffers["buffer_IDCT"]);
+	clReleaseMemObject(buffers["buffer_A_t"]);
+	clReleaseMemObject(buffers["buffer_A"]);
+	clReleaseMemObject(buffers["buffer_phi"]);
+
+	clReleaseCommandQueue(cl_data.queue);
+	clReleaseCommandQueue(cl_data.device_queue);
+	clReleaseContext(cl_data.context);
+	clReleaseDevice(cl_data.device);
+	clReleaseProgram(cl_data.program);
+
 	return img_encrypted;
 }
 
-cv::Mat decryptImage(encryptionImage img, string passphrase) {
+cv::Mat decryptImage(encryptionImage img, string passphrase, int threads) {
 
 	cv::Mat outputImg(cv::Size(img.original_width, img.original_height), CV_8UC3);
 
@@ -715,6 +681,7 @@ cv::Mat decryptImage(encryptionImage img, string passphrase) {
 	int N = processed_width / img.TILE_SIZE;
 	int M = processed_height / img.TILE_SIZE;
 
+	// initializing opencl context
 	openCLContext cl_data{ NULL, NULL, NULL, NULL, NULL, NULL, 0 };
 	createOpenCLcontext(cl_data);
 
@@ -733,9 +700,6 @@ cv::Mat decryptImage(encryptionImage img, string passphrase) {
 	kernels["shrink_gpu_sp"] = clCreateKernel(cl_data.program, "shrink_gpu_sp", &cl_data.err);
 	kernels["ADM"] = clCreateKernel(cl_data.program, "ADM", &cl_data.err);
 
-
-	char seed[4];
-
 	std::vector<unsigned int> seeds = passord_to_seeds(passphrase);
 
 	generate_decryption_matrix(buffers, cl_data.context, cl_data.queue, kernels, img.TILE_SIZE, cl_data.device, cl_data.program, seeds);
@@ -753,20 +717,15 @@ cv::Mat decryptImage(encryptionImage img, string passphrase) {
 			vector<float> new_vec(first, last);
 			buffers["buffer_b" + std::to_string(i) + "_" + std::to_string(j)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * img.TILE_SIZE * img.TILE_SIZE, NULL, NULL);
 			clEnqueueWriteBuffer(cl_data.queue, buffers["buffer_b" + std::to_string(i) + "_" + std::to_string(j)], CL_TRUE, 0, sizeof(float) * new_vec.size(), new_vec.data(), 0, NULL, NULL);
-
-			vector<float> aux(img.TILE_SIZE * img.TILE_SIZE);
-			clEnqueueReadBuffer(cl_data.queue, buffers["buffer_b" + std::to_string(i) + "_" + std::to_string(j)], CL_TRUE, 0, sizeof(float) * aux.size(), aux.data(), 0, NULL, NULL);
-			clFinish(cl_data.queue);
 		}
 	}
 
 	std::vector<cv::Mat> array_of_images_out = splitImage(outputImg, N, M);
 
-
-	#pragma omp parallel for num_threads(4) schedule(dynamic)
+	#pragma omp parallel for num_threads(threads) schedule(dynamic)
 	for (int i = 0; i < array_of_images_out.size(); i++) {
 		array_of_images_out[i].setTo(0);
-		decrypt_image_alt(array_of_images_out[i], buffers, img.TILE_SIZE, max_eig, i);
+		decrypt_image(array_of_images_out[i], buffers, img.TILE_SIZE, max_eig, i);
 	}
 
 	bool OK1 = false;
@@ -796,6 +755,23 @@ cv::Mat decryptImage(encryptionImage img, string passphrase) {
 	}
 
 	cv::resize(final_image2, final_image2, cv::Size(original_width, original_height));
+
+	clReleaseMemObject(buffers["buffer_IDCT"]);
+	clReleaseMemObject(buffers["buffer_A_t"]);
+	clReleaseMemObject(buffers["buffer_A"]);
+	clReleaseMemObject(buffers["buffer_phi"]);
+
+	for (int i = 0; i < N * M; i++) {
+		for (int j = 0; j < 3; j++) {
+			clReleaseMemObject(buffers["buffer_b" + std::to_string(i) + "_" + std::to_string(j)]);
+		}
+	}
+
+	clReleaseCommandQueue(cl_data.queue);
+	clReleaseCommandQueue(cl_data.device_queue);
+	clReleaseContext(cl_data.context);
+	clReleaseDevice(cl_data.device);
+	clReleaseProgram(cl_data.program);
 
 	return final_image2;
 }

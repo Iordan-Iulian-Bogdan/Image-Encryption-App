@@ -27,5 +27,5 @@ struct openCLContext {
 	cl_int err;
 };
 
-encryptionImage encryptImage(cv::Mat img, int TILE_SIZE, std::string passphrase);
-cv::Mat decryptImage(encryptionImage img, std::string passphrase);
+encryptionImage encryptImage(cv::Mat img, int TILE_SIZE, std::string passphrase, int threads);
+cv::Mat decryptImage(encryptionImage img, std::string passphrase, int threads);
