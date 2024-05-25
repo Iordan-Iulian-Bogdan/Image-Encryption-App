@@ -433,9 +433,7 @@ void encrypt_data(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::v
 	buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = buffers["buffer_res_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)];
 
 	measurments["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = res;
-	clReleaseMemObject(buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)]);
-	clReleaseMemObject(buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)]);
-	clReleaseMemObject(buffers["buffer_res_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)]);
+
 	clFinish(cl_data.queue);
 }
 
@@ -553,7 +551,7 @@ vector<unsigned int> passord_to_seeds(string& password) {
 encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
 							int TILE_SIZE, /* size of tiles in which the image is broken up and processed, larger tiles may provide better quality at the cost of memory and speed */
 							string passphrase, /* passphare used to generate the encryption matrix */
-							int threads /* number of tiles to be processed simultaneously */ ) {
+							int threads /* number of tiles to be encrypted simultaneously */ ) {
 
 	try {
 		bool isImgEmpty = img.empty();
@@ -644,6 +642,14 @@ encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
 	clReleaseMemObject(buffers["buffer_A_t"]);
 	clReleaseMemObject(buffers["buffer_A"]);
 	clReleaseMemObject(buffers["buffer_phi"]);
+
+	for (int i = 0; i < N * M; i++) {
+		for (int j = 0; j < 3; j++) {
+			clReleaseMemObject(buffers["buffer_b" + std::to_string(i) + "_" + std::to_string(j)]);
+			clReleaseMemObject(buffers["buffer_vec_decrypt" + std::to_string(i) + "_" + std::to_string(j)]);
+			clReleaseMemObject(buffers["buffer_res_decrypt" + std::to_string(i) + "_" + std::to_string(j)]);
+		}
+	}
 
 	clReleaseCommandQueue(cl_data.queue);
 	clReleaseCommandQueue(cl_data.device_queue);
