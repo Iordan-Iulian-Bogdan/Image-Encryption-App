@@ -382,6 +382,8 @@ float generate_dictionary(map<string, cl_mem>& buffers, cl_context context, cl_c
 	return max_eig;
 }
 
+// encrypts a segment of data by multiplying the vectorized image with the encryption matrix
+// stores the encrypted data in the measurments vector
 void encrypt_data(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::vector<float>>& measurments, openCLContext& cl_data, map<string, cl_kernel> kernels, uint32_t tile_size, int index1, int index2)
 {
 	cl_int err;
@@ -437,6 +439,7 @@ void encrypt_data(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::v
 	clFinish(cl_data.queue);
 }
 
+// encrypts an image, this will usally be a tile sized section of the original image to be encrypted
 void encrypt_image(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::vector<float>>& measurments, uint32_t TILE_SIZE, int index) {
 
 	// initializing opencl context
@@ -454,11 +457,19 @@ void encrypt_image(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::
 	kernels["shrink_gpu_sp"] = clCreateKernel(cl_data.program, "shrink_gpu_sp", &cl_data.err);
 	kernels["ADM"] = clCreateKernel(cl_data.program, "ADM", &cl_data.err);
 
+	// extracting each color channel
 	cv::Mat channels[3];
 	cv::split(img, channels);
 
+	// encrypting the data for each color channel
 	for (int i = 0; i < 3; i++) {
 		encrypt_data(channels[i], buffers, measurments, cl_data, kernels, TILE_SIZE, index, i);
+	}
+
+	for (int i = 0; i < 3; i++) {
+		clReleaseMemObject(buffers["buffer_b" + std::to_string(index) + "_" + std::to_string(i)]);
+		clReleaseMemObject(buffers["buffer_vec_decrypt" + std::to_string(index) + "_" + std::to_string(i)]);
+		clReleaseMemObject(buffers["buffer_res_decrypt" + std::to_string(index) + "_" + std::to_string(i)]);
 	}
 
 	clReleaseCommandQueue(cl_data.queue);
@@ -471,6 +482,8 @@ void encrypt_image(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::
 		clReleaseKernel(i->second);
 }
 
+// the encryption matrix is a random matrix generated using the seeds from the passphrase
+// every seed is used to generate a portion of the matrix
 void generate_decryption_matrix(map<string, cl_mem>& buffers, cl_context context, cl_command_queue queue, map<string, cl_kernel> kernels, uint32_t size, cl_device_id device, cl_program program, vector<unsigned int> seeds) {
 	cl_int err;
 
@@ -620,7 +633,8 @@ encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
 	std::vector<cv::Mat> array_of_images = splitImage(img, N, M);
 
 	std::vector<unsigned int> seeds = passord_to_seeds(passphrase);
-
+	
+	// generating the encryption matrix
 	generate_decryption_matrix(buffers, cl_data.context, cl_data.queue, kernels, TILE_SIZE, cl_data.device, cl_data.program, seeds);
 
 	#pragma omp parallel for num_threads(threads) schedule(dynamic)
@@ -643,14 +657,6 @@ encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
 	clReleaseMemObject(buffers["buffer_A"]);
 	clReleaseMemObject(buffers["buffer_phi"]);
 
-	for (int i = 0; i < N * M; i++) {
-		for (int j = 0; j < 3; j++) {
-			clReleaseMemObject(buffers["buffer_b" + std::to_string(i) + "_" + std::to_string(j)]);
-			clReleaseMemObject(buffers["buffer_vec_decrypt" + std::to_string(i) + "_" + std::to_string(j)]);
-			clReleaseMemObject(buffers["buffer_res_decrypt" + std::to_string(i) + "_" + std::to_string(j)]);
-		}
-	}
-
 	clReleaseCommandQueue(cl_data.queue);
 	clReleaseCommandQueue(cl_data.device_queue);
 	clReleaseContext(cl_data.context);
@@ -660,7 +666,9 @@ encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
 	return img_encrypted;
 }
 
-cv::Mat decryptImage(encryptionImage img, string passphrase, int threads) {
+cv::Mat decryptImage(encryptionImage img, /* struct containing encrypted image */
+					string passphrase, /* passphare used to generate the encryption matrix, must be the same as the one used at encryption time */
+					int threads /* number of tiles to be encrypted simultaneously */ ) {
 
 	cv::Mat outputImg(cv::Size(img.original_width, img.original_height), CV_8UC3);
 

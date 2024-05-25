@@ -4,7 +4,7 @@
 int main()
 {
 
-	cv::Mat img = cv::imread("C:/images/500.jpg", cv::IMREAD_COLOR);
+	cv::Mat img = cv::imread("C:/images/256.jpg", cv::IMREAD_COLOR);
 	uint32_t TILE_SIZE = 64;
 
 	if (img.empty())
@@ -15,7 +15,7 @@ int main()
 	encryptionImage img_encrypted = encryptImage(img, TILE_SIZE, "5v48v5832v5924", 4);
 	cv::Mat out = decryptImage(img_encrypted, "5v48v5832v5924", 4);
 	imshow("Display window", out);
-	//int y = cv::waitKey(0);
+	int y = cv::waitKey(0);
 
 	return 1;
 }
