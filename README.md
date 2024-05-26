@@ -38,7 +38,7 @@ How to use :
 
 ```encryptionImage img_encrypted = encryptImage(img, TILE_SIZE, "5v48v5832v5924", 4);```
 
-This encrypts the image and stores in into struct which contains the encrypted data and some other info needed to properly decrypt the image after. 
+This encrypts the image and stores it into a struct which contains the encrypted data and some other info needed to properly decrypt the image after. 
 
 ```
 encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
