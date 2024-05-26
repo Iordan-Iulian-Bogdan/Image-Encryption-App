@@ -28,7 +28,7 @@ Sf - End
 Outputs : 𝑥′ vectorized decrypted image
 ```
 
-This works only if the dictionary ```A``` is identical upon encryption and decryption. ```A``` is usually meant to be a random matrix but by using a deterministic number generator which is seeded using a passphrase we can encrypt and decrypt an arbitrary signal. Keep in mind that this method is not lossless, the reconstructed signal will not be 100% identical, this is why you'd only want to use something like this for things like images.
+This works only if the  measurement matrix ```𝜓``` is identical upon encryption and decryption. ```𝜓``` is usually meant to be a random matrix but by using a deterministic number generator which is seeded using a passphrase we can encrypt and decrypt an arbitrary signal. Keep in mind that this method is not lossless, the reconstructed signal will not be 100% identical, this is why you'd only want to use something like this for things like images.
 
 Because ```𝑥``` is a vectorized image which means it can have millions of elements the dictionary ```A``` is going to be a matrix with potentially billions of elements (so dozens of GB in size). The challenge in doing something like this comes from the fact that the matrices involved occupy so much memory that it's impossible to solve this problem on a regular computer as is, however, we can divide the original image in smaller chunks that can fit in the memory of a typical computer.
 
