@@ -53,6 +53,10 @@ The longer the passphrase the more seeds are used to generate the encryption mat
 
 ```threads``` is the ammount of instances of chunks of the image that are encrypted in parallel, might provide a speed up, sepcially if the TILE_SIZE is smaller.
 
+Performance : 
+
+~25 minutes to decrypt a 1024x576 image on a 7900 XT.
+
 TODO:
 - [ ] Add CPU fallback
 - [ ] hybrid CPU & GPU acceleration 
