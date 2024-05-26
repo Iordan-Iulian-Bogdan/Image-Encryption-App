@@ -1,4 +1,4 @@
-This is an implementation of an encryption algorithm for images using compressive sensing, this is more of a proof of concept wher we use compressive sensing in a novel way to encrypt images.
+This is an implementation of an encryption algorithm for images using compressive sensing, this is meant to be more of a proof of concept where we use compressive sensing in a novel way to encrypt images.
 
 The overall algorthm for this is as follows : 
 
