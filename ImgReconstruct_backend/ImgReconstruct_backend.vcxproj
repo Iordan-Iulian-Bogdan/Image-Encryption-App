@@ -164,14 +164,12 @@
     <ClCompile Include="Matrix.cpp" />
     <ClCompile Include="matrix_arithmetic_ops.cpp" />
     <ClCompile Include="sparseImageEncryption.cpp" />
-    <ClCompile Include="sparse_representations_solver.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AVX_functions.h" />
     <ClInclude Include="Matrix.h" />
     <ClInclude Include="matrix_arithmetic_ops.h" />
     <ClInclude Include="sparseImageEncryption.h" />
-    <ClInclude Include="sparse_representations_solver.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="gpu_kernels.cl" />

@@ -5,11 +5,11 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/photo.hpp>
-#include "sparse_representations_solver.h"
-#include "sparse_representations_solver.cpp"
 #include <tuple>
 #include <set>
 #include <map>
+#include "Matrix.h"
+#include "Matrix.cpp"
 
 //	struct used to store the encrypted data and how it was formated
 struct encryptionImage {

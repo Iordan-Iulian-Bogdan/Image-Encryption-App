@@ -21,9 +21,6 @@
     <ClCompile Include="matrix_arithmetic_ops.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="sparse_representations_solver.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="Matrix.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -36,9 +33,6 @@
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="matrix_arithmetic_ops.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="sparse_representations_solver.h">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="AVX_functions.h">
