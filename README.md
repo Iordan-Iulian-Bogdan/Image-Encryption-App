@@ -16,7 +16,7 @@ For 𝑖 ← 0 to N , 𝑖 ← 𝑖 + 1 execute // construct dictionary 𝐴
   𝐴 : , 𝑖 = 𝜓 ∗ θ
 End For
 
-𝑠 = 𝐴𝐷𝑀(𝐴, 𝑦, 𝜏,𝛽, 𝑘) // solves the A * x = y equation, where 𝑥 is the unknown encrypted signal using the Alternating Direction Method algorithm
+𝑠 = 𝐴𝐷𝑀(𝐴, 𝑦, 𝜏,𝛽, 𝑘) // solves the 𝐴 * 𝑥 = 𝑦 equation, where 𝑥 is the unknown encrypted signal using the Alternating Direction Method algorithm
 
 For  𝑖 ← 0 to N , 𝑖 ← 𝑖 + 1 execute // reconstruct signal 𝑥 which now represents the decrypted signal
   𝑒𝑘 = 0
