@@ -8,7 +8,7 @@ Inputs : 𝜓 measurement matrix, 𝑥 vectorized image to be encrypted, 𝑁 si
 𝑦 ← 𝜓𝑥 // extracting the measurements, this effectively encrypts the signal 𝑥 into y
 
 // encryption step
-For 𝑖 ← 0 până la N , 𝑖 ← 𝑖 + 1 execute // construct dictionary 𝐴
+For 𝑖 ← 0 to N , 𝑖 ← 𝑖 + 1 execute // construct dictionary 𝐴
   𝑒𝑘 = 0
   𝑒𝑘 𝑖 = 1
   θ = 𝐼𝐷𝐶𝑇(𝑒𝑘)
@@ -18,7 +18,7 @@ End For
 //decryption step
 𝑠 = 𝐴𝐷𝑀(𝐴, 𝑦, 𝜏,𝛽, 𝑘) // solves the A * x = y equation, where 𝑥 is the unknown encrypted signal using the Alternating Direction Method algorithm
 
-For  𝑖 ← 0 până la N , 𝑖 ← 𝑖 + 1 execute // reconstruct signal 𝑥 which now represents the decrypted signal
+For  𝑖 ← 0 to N , 𝑖 ← 𝑖 + 1 execute // reconstruct signal 𝑥 which now represents the decrypted signal
   𝑒𝑘 = 0
   𝑒𝑘 𝑖 = 1
   θ = 𝐼𝐷𝐶𝑇(𝑒𝑘)
