@@ -18,7 +18,7 @@ End For
 
 𝑠 = 𝐴𝐷𝑀(𝐴, 𝑦, 𝜏,𝛽, 𝑘) // solves the 𝐴 * 𝑥 = 𝑦 equation, where 𝑥 is the unknown encrypted signal using the Alternating Direction Method algorithm
 
-For  𝑖 ← 0 to N , 𝑖 ← 𝑖 + 1 execute // reconstruct signal 𝑥 which now represents the decrypted signal
+For  𝑖 ← 0 to N , 𝑖 ← 𝑖 + 1 execute // reconstruct signal 𝑥 which now represents the decrypted signal 𝑥′
   𝑒𝑘 = 0
   𝑒𝑘 𝑖 = 1
   θ = 𝐼𝐷𝐶𝑇(𝑒𝑘)
