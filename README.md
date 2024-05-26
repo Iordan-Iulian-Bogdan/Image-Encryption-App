@@ -52,3 +52,9 @@ The longer the passphrase the more seeds are used to generate the encryption mat
 ```TILE_SIZE``` this is the size of the chunks that are going to processed at a time, larger tile sizes will use more memory but might produce better results. A GPU with more than 8GB of VRAM is needed for a tile size of 128 for example.
 
 ```threads``` is the ammount of instances of chunks of the image that are encrypted in parallel, might provide a speed up, sepcially if the TILE_SIZE is smaller.
+
+TODO:
+- [ ] Add CPU fallback
+- [ ] hybrid CPU & GPU acceleration 
+- [ ] FP16 for potentially faster execution on GPU
+- [ ] General optimizations
