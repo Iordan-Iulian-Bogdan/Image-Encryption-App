@@ -5,9 +5,10 @@ The overall algorthm for this is as follows :
 ```
 Inputs : 𝜓 measurement matrix, 𝑥 vectorized image to be encrypted, 𝑁 signal length of 𝑥, 𝑘number of iterations for ADM, 𝜏, 𝛽 parameters for ADM, 𝑒𝑘, θ auxiliary vectors
 
+// encryption step
 𝑦 ← 𝜓𝑥 // extracting the measurements, this effectively encrypts the signal 𝑥 into y
 
-// encryption step
+//decryption step
 For 𝑖 ← 0 to N , 𝑖 ← 𝑖 + 1 execute // construct dictionary 𝐴
   𝑒𝑘 = 0
   𝑒𝑘 𝑖 = 1
@@ -15,7 +16,6 @@ For 𝑖 ← 0 to N , 𝑖 ← 𝑖 + 1 execute // construct dictionary 𝐴
   𝐴 : , 𝑖 = 𝜓 ∗ θ
 End For
 
-//decryption step
 𝑠 = 𝐴𝐷𝑀(𝐴, 𝑦, 𝜏,𝛽, 𝑘) // solves the A * x = y equation, where 𝑥 is the unknown encrypted signal using the Alternating Direction Method algorithm
 
 For  𝑖 ← 0 to N , 𝑖 ← 𝑖 + 1 execute // reconstruct signal 𝑥 which now represents the decrypted signal
