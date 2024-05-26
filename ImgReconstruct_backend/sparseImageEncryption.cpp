@@ -571,14 +571,16 @@ encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
 							string passphrase, /* passphare used to generate the encryption matrix */
 							int threads /* number of tiles to be encrypted simultaneously */ ) {
 
-	try {
-		bool isImgEmpty = img.empty();
-		if (isImgEmpty) {
-			throw isImgEmpty;
-		}
+	if (img.empty()) {
+		throw std::invalid_argument("Image empty");
 	}
-	catch (...) {
-		std::cout << "Image empty";
+
+	if (TILE_SIZE < 32) {
+		throw std::invalid_argument("Tile size needs to be at least 32");
+	}
+	
+	if (img.size[1] < 256 && img.size[0] < 256) {
+		throw std::invalid_argument("Image size must be at least 256x256");
 	}
 
 	int original_width = img.size[1];
@@ -751,6 +753,8 @@ cv::Mat decryptImage(encryptionImage img, /* struct containing encrypted image *
 		decrypt_image(array_of_images_out[i], buffers, img.TILE_SIZE, max_eig, i);
 	}
 
+
+	// stitching the tiles back together and resizing the image to the original size
 	bool OK1 = false;
 	bool OK2 = false;
 	cv::Mat final_image2;
