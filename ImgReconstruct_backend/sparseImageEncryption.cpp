@@ -160,7 +160,7 @@ void decrypt_data(cv::Mat& out, map<string, cl_mem>& buffers, openCLContext cl_d
 
 	float beta = 0.000001f;
 	float tau = 0.000001f;
-	int iterations = 1000;
+	int iterations = 500;
 
 	vector<float>sol_alt = ADM_gpu(buffers, n, m, max_eig, beta, tau, iterations, cl_data, kernels, index1, index2);
 
