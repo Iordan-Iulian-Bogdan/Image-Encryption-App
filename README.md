@@ -55,7 +55,7 @@ The longer the passphrase the more seeds are used to generate the encryption mat
 
 If the passphrase is icorrect the image will basically look like noise, say you encrypt the following image with the passphrase as "5v48v5832v5924" :
 
-![test_image](https://github.com/Iordan-Iulian-Bogdan/Image-Encryption-App/assets/56405877/33cd0ac8-e144-44b7-a26f-2e1403b9b1f5)
+![good](https://github.com/Iordan-Iulian-Bogdan/Image-Encryption-App/assets/56405877/95477a8c-4e1c-44e7-b4aa-dc5c2ee7c21b)
 
 If the passphrase used to decrypt it is "5v38v5832v5924", the image will look like this :
 
