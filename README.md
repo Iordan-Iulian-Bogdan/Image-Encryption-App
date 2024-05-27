@@ -53,18 +53,18 @@ The longer the passphrase the more seeds are used to generate the encryption mat
 
 ```threads``` is the ammount of instances of chunks of the image that are encrypted in parallel, might provide a speed up, sepcially if the TILE_SIZE is smaller.
 
-If the passphrase is icorrect the image will basically look like noise, say you encryot the following image with the passphrase as "5v48v5832v5924" :
+If the passphrase is icorrect the image will basically look like noise, say you encrypt the following image with the passphrase as "5v48v5832v5924" :
 
 ![test_image](https://github.com/Iordan-Iulian-Bogdan/Image-Encryption-App/assets/56405877/33cd0ac8-e144-44b7-a26f-2e1403b9b1f5)
 
-If the passphrase used to decrypt is "5v38v5832v5924", the image will look like this :
+If the passphrase used to decrypt it is "5v38v5832v5924", the image will look like this :
 
 ![bad](https://github.com/Iordan-Iulian-Bogdan/Image-Encryption-App/assets/56405877/30d58d75-330c-4df6-8dec-c28d3eae05ea)
 
 Performance : 
 
 ~25 minutes to decrypt a 1024x576 image on a 7900 XT.
-
+$${\color{red}Red}$$
 TODO:
 - [ ] Add CPU fallback
 - [ ] hybrid CPU & GPU acceleration 
