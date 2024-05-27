@@ -1,4 +1,4 @@
-This is an implementation of an encryption algorithm for images using compressive sensing, this is meant to be more of a proof of concept where we use compressive sensing in a novel way to encrypt images.CS is typically used to sample signals in an already compressed format but a by product of this process is that the signal also becomes uniquely encoded upon measurement, this can be used for encryption.
+This is an implementation of an encryption algorithm for images using compressive sensing, this is meant to be more of a proof of concept where we use compressive sensing in a novel way to encrypt images. CS is typically used to sample signals in an already compressed format but a by product of this process is that the signal also becomes uniquely encoded upon measurement, this can be used for encryption.
 
 The overall algorthm for this is as follows : 
 
