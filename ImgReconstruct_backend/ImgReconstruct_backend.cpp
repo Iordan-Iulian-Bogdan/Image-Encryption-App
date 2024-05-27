@@ -13,7 +13,7 @@ int main()
 	}
 
 	encryptionImage img_encrypted = encryptImage(img, TILE_SIZE, "5v48v5832v5924");
-	cv::Mat out = decryptImage(img_encrypted, "5v48v5832v5924");
+	cv::Mat out = decryptImage(img_encrypted, "5v48v5832v5924", 4);
 	imshow("Display window", out);
 	cv::imwrite("test_image_decrypted.png", out);
 

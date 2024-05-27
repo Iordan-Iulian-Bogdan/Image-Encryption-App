@@ -160,7 +160,7 @@ void decrypt_data(cv::Mat& out, map<string, cl_mem>& buffers, openCLContext cl_d
 
 	float beta = 0.000001f;
 	float tau = 0.000001f;
-	int iterations = 500;
+	int iterations = 300;
 
 	vector<float>sol_alt = ADM_gpu(buffers, n, m, max_eig, beta, tau, iterations, cl_data, kernels, index1, index2);
 
@@ -677,7 +677,8 @@ encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
 
 cv::Mat decryptImage(encryptionImage img, /* struct containing encrypted image */
 					string passphrase, /* passphare used to generate the encryption matrix, must be the same as the one used at encryption time */
-					int threads /* number of tiles to be encrypted simultaneously */ ) {
+					int threads, /* number of tiles to be encrypted simultaneously */ 
+					bool removeNoise /* enables noise reduction */) {
 
 	cv::Mat outputImg(cv::Size(img.original_width, img.original_height), CV_8UC3);
 
@@ -753,7 +754,6 @@ cv::Mat decryptImage(encryptionImage img, /* struct containing encrypted image *
 		decrypt_image(array_of_images_out[i], buffers, img.TILE_SIZE, max_eig, i);
 	}
 
-
 	// stitching the tiles back together and resizing the image to the original size
 	bool OK1 = false;
 	bool OK2 = false;
@@ -799,6 +799,11 @@ cv::Mat decryptImage(encryptionImage img, /* struct containing encrypted image *
 	clReleaseContext(cl_data.context);
 	clReleaseDevice(cl_data.device);
 	clReleaseProgram(cl_data.program);
+
+	// cleaning up noise
+	if (removeNoise) {
+		cv::fastNlMeansDenoising(final_image2, final_image2, 3);
+	}
 
 	return final_image2;
 }
