@@ -30,7 +30,7 @@ float horizontal_add(__m512 vec) {
 void matrix_vector_mult_avx512(const std::vector<float>& matrix, const std::vector<float>& vector, std::vector<float>& result, size_t rows, size_t cols) {
     result.resize(rows, 0.0f);
     int numThreads = omp_get_max_threads();
-    #pragma omp parallel for num_threads(numThreads / 2) schedule(dynamic)
+    //#pragma omp parallel for num_threads(numThreads / 2) schedule(dynamic)
     for (int64_t i = 0; i < rows; ++i) {
         // Initialize the result for the current row to zero
         __m512 sum = _mm512_setzero_ps();

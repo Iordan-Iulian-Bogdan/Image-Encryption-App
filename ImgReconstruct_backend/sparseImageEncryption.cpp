@@ -1154,18 +1154,22 @@ cv::Mat decryptImage(encryptionImage img, /* struct containing encrypted image *
 	std::vector<int> array_of_processed_images(array_of_images_out.size(), 1);
 
 	vector<std::thread> GPUProcessing(threads);
-	std::thread CPUProcessing;
+	vector<std::thread> CPUProcessing(threads);
 
 	// starting threads which process each tile based on the type of acceleration
 	switch (acceleration) {
 	case HYBRID_ACCELERATION:
-		CPUProcessing = std::thread(CPUProcessingTask, std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers_cpu), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
+		for (int i = 0; i < threads; i++) {
+			CPUProcessing[i] = std::thread(CPUProcessingTask, std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers_cpu), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
+		}		
 		for (int i = 0; i < threads; i++) {
 			GPUProcessing[i] = std::thread(GPUProcessingTask, std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
 		}
 		break;
 	case CPU_ONLY_ACCELERATION:
-		CPUProcessing = std::thread(CPUProcessingTask, std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers_cpu), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
+		for (int i = 0; i < threads; i++) {
+			CPUProcessing[i] = std::thread(CPUProcessingTask, std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers_cpu), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
+		}	
 		break;
 	case GPU_ACCELERATION:
 		for (int i = 0; i < threads; i++) {
@@ -1173,20 +1177,24 @@ cv::Mat decryptImage(encryptionImage img, /* struct containing encrypted image *
 		}
 		break;
 	default:
-		CPUProcessing = std::thread(CPUProcessingTask, std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers_cpu), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
+		for (int i = 0; i < threads; i++) {
+			CPUProcessing[i] = std::thread(CPUProcessingTask, std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers_cpu), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
+		}	
 		break;
 	}
 
 	// waiting for the threads to finish
 	switch (acceleration) {
 	case HYBRID_ACCELERATION:
-		CPUProcessing.join();
 		for (int i = 0; i < threads; i++) {
 			GPUProcessing[i].join();
+			CPUProcessing[i].join();
 		}
 		break;
 	case CPU_ONLY_ACCELERATION:
-		CPUProcessing.join();
+		for (int i = 0; i < threads; i++) {
+			CPUProcessing[i].join();
+		}
 		break;
 	case GPU_ACCELERATION:
 		for (int i = 0; i < threads; i++) {
@@ -1194,7 +1202,9 @@ cv::Mat decryptImage(encryptionImage img, /* struct containing encrypted image *
 		}
 		break;
 	default:
-		CPUProcessing.join();
+		for (int i = 0; i < threads; i++) {
+			CPUProcessing[i].join();
+		}
 		break;
 	}
 	//GPUProcessingTask(std::vector<int>&available_tiles, std::vector<cv::Mat>&array_of_images_out, map<string, cl_mem>&buffers, uint32_t TILE_SIZE, float max_eig)
