@@ -42,9 +42,11 @@ This encrypts the image and stores it into a struct which contains the encrypted
 
 ```
 encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
-							int TILE_SIZE, /* size of tiles in which the image is broken up and processed, larger tiles may provide better quality at the cost of memory and speed */
-							string passphrase, /* passphare used to generate the encryption matrix */
-							int threads /* number of tiles to be encrypted simultaneously */ )
+				string passphrase, /* passphare used to generate the encryption matrix, must be the same as the one used at encryption time */
+				int acceleration,
+				int threads, /* number of tiles to be encrypted simultaneously */
+				int iterations, /* the larger the tile the less need for more iterations */
+				bool removeNoise) { /* enables noise reduction */
 ```
 
 The longer the passphrase the more seeds are used to generate the encryption matrix ```A``` and thus the encryption is more secure. 
@@ -52,6 +54,7 @@ The longer the passphrase the more seeds are used to generate the encryption mat
 ```TILE_SIZE``` this is the size of the chunks that are going to processed at a time, larger tile sizes will use more memory but might produce better results. A GPU with more than 8GB of VRAM is needed for a tile size of 128 for example.
 
 ```threads``` is the ammount of instances of chunks of the image that are encrypted in parallel, might provide a speed up, sepcially if the TILE_SIZE is smaller.
+```acceleration``` represents the type of acceleration, HYBRID_ACCELERATION, GPU_ACCELERATION, CPU_ONLY_ACCELERATION
 
 If the passphrase is incorrect the image will basically look like noise, say you encrypt the following image with the passphrase as "5v48v5832v5924" :
 
