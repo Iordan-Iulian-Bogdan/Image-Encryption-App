@@ -17,7 +17,7 @@ int main() {
     }
 
     encryptionImage img_encrypted = encryptImage(img, TILE_SIZE, "5v48v5832v5924", HYBRID_ACCELERATION);
-    cv::Mat out = decryptImage(img_encrypted, "5v48v5832v5924", HYBRID_ACCELERATION, 8, 300);
+    cv::Mat out = decryptImage(img_encrypted, "5v48v5832v5924", HYBRID_ACCELERATION, 12, 300);
     imshow("Display window", out);
     cv::imwrite("test_image_decrypted.png", out);
 

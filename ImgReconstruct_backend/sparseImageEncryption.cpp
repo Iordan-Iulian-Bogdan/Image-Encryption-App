@@ -1066,7 +1066,7 @@ cv::Mat decryptImage(encryptionImage img, /* struct containing encrypted image *
 	string passphrase, /* passphare used to generate the encryption matrix, must be the same as the one used at encryption time */
 	int acceleration,
 	int threads, /* number of tiles to be encrypted simultaneously */
-	int iterations,
+	int iterations, /* the larger the tile the less need for more iterations */
 	bool removeNoise) { /* enables noise reduction */
 
 	cv::Mat outputImg(cv::Size(img.original_width, img.original_height), CV_8UC3);
