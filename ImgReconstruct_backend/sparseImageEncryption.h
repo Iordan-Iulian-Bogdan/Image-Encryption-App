@@ -11,6 +11,14 @@
 #include "Matrix.h"
 #include "Matrix.cpp"
 
+// is going to be the fastest option if the CPU is decently fast
+#define HYBRID_ACCELERATION 1 
+// possibly the fastest if the TILE_SIZE is large
+#define GPU_ACCELERATION 2 
+// could be the fastest is TILE_SIZE is small and the GPU is slow like an integrated one
+// porbably the fastest to use for the encryption step
+#define CPU_ONLY_ACCELERATION 3 
+
 //	struct used to store the encrypted data and how it was formated
 struct encryptionImage {
 	int TILE_SIZE, original_width, original_height, processed_width, processed_height;
@@ -27,5 +35,5 @@ struct openCLContext {
 	cl_int err;
 };
 
-encryptionImage encryptImage(cv::Mat img, int TILE_SIZE, std::string passphrase, int threads = 1);
-cv::Mat decryptImage(encryptionImage img, std::string passphrase, int threads = 1, bool removeNoise = false);
+encryptionImage encryptImage(cv::Mat img, int TILE_SIZE, std::string passphrase, int acceleration, int threads = 1);
+cv::Mat decryptImage(encryptionImage img, std::string passphrase, int acceleration, int threads = 1, int iterations = 300, bool removeNoise = false);

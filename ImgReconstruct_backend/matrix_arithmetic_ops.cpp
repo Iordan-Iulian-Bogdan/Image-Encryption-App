@@ -5,7 +5,76 @@
 #include <fstream>
 #include <sstream>
 
+void transpose_matrix_avx512(const std::vector<float>& input, std::vector<float>& output, size_t rows, size_t cols) {
 
+}
+
+float horizontal_add(__m512 vec) {
+    // Perform horizontal addition by reducing the elements
+    __m256 low = _mm512_castps512_ps256(vec);
+    __m256 high = _mm512_extractf32x8_ps(vec, 1);
+    __m256 sum = _mm256_add_ps(low, high);
+
+    __m128 low128 = _mm256_castps256_ps128(sum);
+    __m128 high128 = _mm256_extractf128_ps(sum, 1);
+    __m128 sum128 = _mm_add_ps(low128, high128);
+
+    __m128 shuf = _mm_movehdup_ps(sum128);
+    __m128 sums = _mm_add_ps(sum128, shuf);
+    shuf = _mm_movehl_ps(shuf, sums);
+    sums = _mm_add_ss(sums, shuf);
+
+    return _mm_cvtss_f32(sums);
+}
+
+void matrix_vector_mult_avx512(const std::vector<float>& matrix, const std::vector<float>& vector, std::vector<float>& result, size_t rows, size_t cols) {
+    result.resize(rows, 0.0f);
+    int numThreads = omp_get_max_threads();
+    #pragma omp parallel for num_threads(numThreads / 2) schedule(static)
+    for (int64_t i = 0; i < rows; ++i) {
+        // Initialize the result for the current row to zero
+        __m512 sum = _mm512_setzero_ps();
+
+        for (int64_t j = 0; j < cols; j += 16) {
+            // Load 16 elements from the current row of the matrix
+            __m512 mat_row = _mm512_loadu_ps(matrix.data() + i * cols + j);
+
+            // Load 16 elements from the vector
+            __m512 vec = _mm512_loadu_ps(vector.data() + j);
+
+            // Multiply the matrix row by the vector and accumulate using FMA
+            sum = _mm512_fmadd_ps(mat_row, vec, sum);
+        }
+
+        // Perform horizontal addition to get the final result for the current row
+        result[i] = horizontal_add(sum);
+    }
+}
+
+void matrix_matrix_mult_avx512(const std::vector<float>& A, const std::vector<float>& B, std::vector<float>& C, size_t rowsA, size_t colsA, size_t colsB) {
+    int numThreads = omp_get_max_threads();
+    //#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
+    for (int64_t i = 0; i < rowsA; ++i) {
+        for (int64_t k = 0; k < colsA; ++k) {
+            // Load one element from A
+            __m512 a_elem = _mm512_set1_ps(A[i * colsA + k]);
+
+            for (int64_t j = 0; j < colsB; j += 16) {
+                // Load 16 elements from the current row of B
+                __m512 b_row = _mm512_loadu_ps(B.data() + k * colsB + j);
+
+                // Load 16 elements from the current row of C
+                __m512 c_row = _mm512_loadu_ps(C.data() + i * colsB + j);
+
+                // Multiply and accumulate using FMA
+                c_row = _mm512_fmadd_ps(a_elem, b_row, c_row);
+
+                // Store the result back into C
+                _mm512_storeu_ps(C.data() + i * colsB + j, c_row);
+            }
+        }
+    }
+}
 
 void multiplyMatricesAVX512(const std::vector<float>& A, const std::vector<float>& B, std::vector<float>& C, size_t numRowsA, size_t numColsA, size_t numColsB) {
 
