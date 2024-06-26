@@ -19,12 +19,6 @@
 // porbably the fastest to use for the encryption step
 #define CPU_ONLY_ACCELERATION 3 
 
-//	struct used to store the encrypted data and how it was formated
-struct encryptionImage {
-	int TILE_SIZE, original_width, original_height, processed_width, processed_height;
-	std::vector<float> data_array;
-};
-
 struct openCLContext {
 	cl_platform_id platform;
 	cl_device_id device;

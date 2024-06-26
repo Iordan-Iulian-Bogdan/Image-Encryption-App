@@ -7,7 +7,7 @@
 #include <sstream>
 #include <omp.h>
 #include <chrono>
-#include "matrix_arithmetic_ops.h"
+#include "helper_functions.h"
 
 template<class T>
 class Matrix

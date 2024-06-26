@@ -18,7 +18,7 @@
     <ClCompile Include="ImgReconstruct_backend.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="matrix_arithmetic_ops.cpp">
+    <ClCompile Include="helper_functions.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Matrix.cpp">
@@ -32,7 +32,7 @@
     <ClInclude Include="Matrix.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="matrix_arithmetic_ops.h">
+    <ClInclude Include="helper_functions.h">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="AVX_functions.h">
@@ -46,5 +46,6 @@
     <None Include="gpu_kernels.cl">
       <Filter>Source Files</Filter>
     </None>
+    <None Include="clblast.dll" />
   </ItemGroup>
 </Project>

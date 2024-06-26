@@ -129,14 +129,14 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <OpenMPSupport>true</OpenMPSupport>
-      <AdditionalIncludeDirectories>C:\Program Files %28x86%29\AMD APP SDK\3.0\include;C:\opencv\opencv\build\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\iorda\Downloads\CLBlast-1.6.2-windows-x64\CLBlast-1.6.2-windows-x64\CLBlast-1.6.2-windows-x64\include;C:\Program Files %28x86%29\AMD APP SDK\3.0\include;C:\opencv\opencv\build\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>opencv_world490d.lib;OpenCL.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>C:\Program Files %28x86%29\AMD APP SDK\3.0\lib\x86_64;C:\opencv\opencv\build\x64\vc16\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencv_world490d.lib;OpenCL.lib;clblast.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>C:\Users\iorda\Downloads\CLBlast-1.6.2-windows-x64\CLBlast-1.6.2-windows-x64\CLBlast-1.6.2-windows-x64\lib;C:\Program Files %28x86%29\AMD APP SDK\3.0\lib\x86_64;C:\opencv\opencv\build\x64\vc16\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -162,16 +162,17 @@
   <ItemGroup>
     <ClCompile Include="ImgReconstruct_backend.cpp" />
     <ClCompile Include="Matrix.cpp" />
-    <ClCompile Include="matrix_arithmetic_ops.cpp" />
+    <ClCompile Include="helper_functions.cpp" />
     <ClCompile Include="sparseImageEncryption.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AVX_functions.h" />
     <ClInclude Include="Matrix.h" />
-    <ClInclude Include="matrix_arithmetic_ops.h" />
+    <ClInclude Include="helper_functions.h" />
     <ClInclude Include="sparseImageEncryption.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="clblast.dll" />
     <None Include="gpu_kernels.cl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
