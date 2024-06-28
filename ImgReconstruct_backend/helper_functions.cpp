@@ -5,45 +5,39 @@
 #include <fstream>
 #include <sstream>
 
-float horizontal_add(__m512 vec) {
-    // Perform horizontal addition by reducing the elements
-    __m256 low = _mm512_castps512_ps256(vec);
-    __m256 high = _mm512_extractf32x8_ps(vec, 1);
-    __m256 sum = _mm256_add_ps(low, high);
-
-    __m128 low128 = _mm256_castps256_ps128(sum);
-    __m128 high128 = _mm256_extractf128_ps(sum, 1);
-    __m128 sum128 = _mm_add_ps(low128, high128);
-
-    __m128 shuf = _mm_movehdup_ps(sum128);
-    __m128 sums = _mm_add_ps(sum128, shuf);
-    shuf = _mm_movehl_ps(shuf, sums);
-    sums = _mm_add_ss(sums, shuf);
-
-    return _mm_cvtss_f32(sums);
-}
-
 void matrix_vector_mult_avx512(const std::vector<float>& matrix, const std::vector<float>& vector, std::vector<float>& result, size_t rows, size_t cols) {
-    result.resize(rows, 0.0f);
+
     int numThreads = omp_get_max_threads();
     #pragma omp parallel for num_threads(numThreads / 2) schedule(dynamic)
     for (int64_t i = 0; i < rows; ++i) {
-        // Initialize the result for the current row to zero
-        __m512 sum = _mm512_setzero_ps();
+        __m512 vec_result = _mm512_setzero_ps();
+        for (size_t j = 0; j < cols; j += 16) {
+            // Load 16 floats from the matrix row and vector
+            __m512 mat_row = _mm512_loadu_ps(&matrix[i * cols + j]);
+            __m512 vec_col = _mm512_loadu_ps(&vector[j]);
 
-        for (int64_t j = 0; j < cols; j += 16) {
-            // Load 16 elements from the current row of the matrix
-            __m512 mat_row = _mm512_loadu_ps(matrix.data() + i * cols + j);
+            // Perform element-wise multiplication
+            __m512 mul = _mm512_mul_ps(mat_row, vec_col);
 
-            // Load 16 elements from the vector
-            __m512 vec = _mm512_loadu_ps(vector.data() + j);
-
-            // Multiply the matrix row by the vector and accumulate using FMA
-            sum = _mm512_fmadd_ps(mat_row, vec, sum);
+            // Add the result to the accumulator
+            vec_result = _mm512_add_ps(vec_result, mul);
         }
 
-        // Perform horizontal addition to get the final result for the current row
-        result[i] = horizontal_add(sum);
+        // Horizontally add all elements of vec_result and store it in result[i]
+        result[i] = _mm512_reduce_add_ps(vec_result);
+    }
+}
+
+void matrix_mult_avx512(const std::vector<float>& matrixA, const std::vector<float>& matrixB, std::vector<float>& result, size_t rowsA, size_t colsA, size_t colsB) {
+
+    int numThreads = omp_get_max_threads();
+    #pragma omp parallel for num_threads(numThreads / 2) schedule(dynamic)
+    for (int i = 0; i < rowsA; ++i) {
+        for (int j = 0; j < colsB; ++j) {
+            for (int k = 0; k < colsA; ++k) {
+                result[i * colsB + j] += matrixA[i * colsA + k] * matrixB[k * colsB + j];
+            }
+        }
     }
 }
 

@@ -17,7 +17,7 @@
 #define GPU_ACCELERATION 2 
 // could be the fastest is TILE_SIZE is small and the GPU is slow like an integrated one
 // porbably the fastest to use for the encryption step
-#define CPU_ONLY_ACCELERATION 3 
+#define CPU_ACCELERATION 3 
 
 struct openCLContext {
 	cl_platform_id platform;

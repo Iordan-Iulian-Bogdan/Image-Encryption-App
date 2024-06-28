@@ -11,8 +11,8 @@
 //void multiplyMatrices(const std::vector<float>& A, const std::vector<float>& B, std::vector<float>& result, size_t rows_A, size_t cols_A, size_t cols_B);
 //void multiplyVectorScalarAVX512(std::vector<float>& vec, float scalar);
 //void multiplyVectorScalar(std::vector<float>& vec, float scalar);
-void matrix_vector_mult_avx512(const std::vector<float>& matrix, const std::vector<float>& vector, std::vector<float>& result, size_t rows, size_t cols);
-//void matrix_matrix_mult_avx512(const std::vector<float>& A, const std::vector<float>& B, std::vector<float>& C, size_t rowsA, size_t colsA, size_t colsB);
+void matrix_vector_mult_avx512(const std::vector<float>& matrix, const std::vector<float>& vector, std::vector<float>& result, size_t rows, size_t cols); 
+void matrix_mult_avx512(const std::vector<float>& matrixA, const std::vector<float>& matrixB, std::vector<float>& result, size_t rowsA, size_t colsA, size_t colsB);
 float eigen_aprox_polynomial(uint32_t x);
 int retAvailableTile(std::vector<int>& array_of_images);
 
