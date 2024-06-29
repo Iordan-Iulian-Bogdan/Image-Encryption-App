@@ -4,9 +4,39 @@
 std::mutex mtx_tile;
 std::mutex write_measurment;
 
-void createOpenCLcontext(openCLContext& cl_data) {
-	clGetPlatformIDs(1, &cl_data.platform, NULL);
-	clGetDeviceIDs(cl_data.platform, CL_DEVICE_TYPE_GPU, 1, &cl_data.device, NULL);
+void createOpenCLcontext(openCLContext& cl_data, string device_name) {
+	cl_uint numPlatforms = 0;
+	clGetPlatformIDs(0, NULL, &numPlatforms);
+	std::vector<cl_platform_id> platforms(numPlatforms);
+	clGetPlatformIDs(numPlatforms, platforms.data(), NULL);
+	cl_uint numDevices = 0;
+	cl_device_id device;
+	std::vector<cl_device_id> devices;
+	for (cl_uint i = 0; i < numPlatforms; ++i) {
+
+		cl_uint numDevices = 0;
+		clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
+
+		// Get device IDs
+		devices.resize(numDevices);
+		clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, numDevices, devices.data(), NULL);
+
+		for (cl_uint j = 0; j < numDevices; ++j) {
+			// Display device information
+			char deviceName[1024];
+			clGetDeviceInfo(devices[j], CL_DEVICE_NAME, sizeof(deviceName), deviceName, NULL);
+			
+			string strdata = deviceName;
+			strdata = strdata.substr(0, 8);
+
+			if (strdata == device_name) {
+				cl_data.device = devices[j];
+				cl_data.platform = platforms[i];
+			}
+
+		}
+	}
+
 	cl_data.context = clCreateContext(NULL, 1, &cl_data.device, NULL, NULL, &cl_data.err);
 	cl_queue_properties properties[] = { CL_QUEUE_PROPERTIES, (cl_command_queue_properties)(CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_ON_DEVICE | CL_QUEUE_ON_DEVICE_DEFAULT), 0 };
 
@@ -233,7 +263,7 @@ void decrypt_image(cv::Mat& out, map<string, cl_mem>& buffers, uint32_t TILE_SIZ
 
 	// initializing opencl context
 	openCLContext cl_data{ NULL, NULL, NULL, NULL, NULL, NULL, 0 };
-	createOpenCLcontext(cl_data);
+	createOpenCLcontext(cl_data, "gfx1100");
 
 	map<string, cl_kernel> kernels;
 
@@ -542,7 +572,7 @@ void encrypt_image(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::
 
 	// initializing opencl context
 	openCLContext cl_data{ NULL, NULL, NULL, NULL, NULL, NULL, 0 };
-	createOpenCLcontext(cl_data);
+	createOpenCLcontext(cl_data, "gfx1100");
 
 	map<string, cl_kernel> kernels;
 
@@ -877,15 +907,15 @@ encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
 	int threads /* number of tiles to be encrypted simultaneously */) {
 
 	if (img.empty()) {
-		throw std::invalid_argument("Image empty");
+		throw std::runtime_error("Image empty");
 	}
 
 	if (TILE_SIZE < 32) {
-		throw std::invalid_argument("Tile size needs to be at least 32");
+		throw std::runtime_error("Tile size needs to be at least 32");
 	}
 
 	if (img.size[1] < 256 && img.size[0] < 256) {
-		throw std::invalid_argument("Image size must be at least 256x256");
+		throw std::runtime_error("Image size must be at least 256x256");
 	}
 
 	int original_width = img.size[1];
@@ -917,7 +947,7 @@ encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
 
 	// initializing opencl context
 	openCLContext cl_data{ NULL, NULL, NULL, NULL, NULL, NULL, 0 };
-	createOpenCLcontext(cl_data);
+	createOpenCLcontext(cl_data, "gfx1100");
 
 	int k = 0;
 
@@ -1066,7 +1096,7 @@ cv::Mat decryptImage(encryptionImage img, /* struct containing encrypted image *
 
 	// initializing opencl context
 	openCLContext cl_data{ NULL, NULL, NULL, NULL, NULL, NULL, 0 };
-	createOpenCLcontext(cl_data);
+	createOpenCLcontext(cl_data, "gfx1100");
 
 	int k = 0;
 

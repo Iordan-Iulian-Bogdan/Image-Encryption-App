@@ -8,7 +8,7 @@
 void matrix_vector_mult_avx512(const std::vector<float>& matrix, const std::vector<float>& vector, std::vector<float>& result, size_t rows, size_t cols) {
 
     int numThreads = omp_get_max_threads();
-    #pragma omp parallel for num_threads(numThreads / 2) schedule(dynamic)
+    #pragma omp parallel for num_threads(numThreads) schedule(dynamic)
     for (int64_t i = 0; i < rows; ++i) {
         __m512 vec_result = _mm512_setzero_ps();
         for (size_t j = 0; j < cols; j += 16) {
@@ -32,11 +32,24 @@ void matrix_mult_avx512(const std::vector<float>& matrixA, const std::vector<flo
 
     int numThreads = omp_get_max_threads();
     #pragma omp parallel for num_threads(numThreads / 2) schedule(dynamic)
-    for (int i = 0; i < rowsA; ++i) {
-        for (int j = 0; j < colsB; ++j) {
-            for (int k = 0; k < colsA; ++k) {
-                result[i * colsB + j] += matrixA[i * colsA + k] * matrixB[k * colsB + j];
+    for (int64_t i = 0; i < rowsA; ++i) {
+        for (size_t j = 0; j < colsB; ++j) {
+            __m512 vec_result = _mm512_setzero_ps();
+            for (size_t k = 0; k < colsA; k += 16) {
+                // Load 16 floats from the current row of matrixA
+                __m512 matA_row = _mm512_loadu_ps(&matrixA[i * colsA + k]);
+                // Load 16 floats from the current column of matrixB
+                __m512 matB_col = _mm512_loadu_ps(&matrixB[k * colsB + j]);
+
+                // Perform element-wise multiplication
+                __m512 mul = _mm512_mul_ps(matA_row, matB_col);
+
+                // Add the result to the accumulator
+                vec_result = _mm512_add_ps(vec_result, mul);
             }
+
+            // Horizontally add all elements of vec_result and store it in result[i * colsB + j]
+            result[i * colsB + j] = _mm512_reduce_add_ps(vec_result);
         }
     }
 }
