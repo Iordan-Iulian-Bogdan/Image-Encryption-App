@@ -10,6 +10,7 @@ Matrix<T>::Matrix(size_t rows, size_t cols) : rows(rows), cols(cols) {
     {
 
     }
+    //std::cout << "Here";
 }
 
 template <class T>
@@ -20,11 +21,12 @@ Matrix<T>::Matrix(std::vector <T> data, size_t rows, size_t cols) : rows(rows), 
     {
 
     }
+    //std::cout << "Here";
 }
 
 
 template <class T>
-Matrix<T>::Matrix(const Matrix& other) : rows(other.rows), cols(other.cols), data(other.data) {}
+Matrix<T>::Matrix(const Matrix& other) : rows(other.rows), cols(other.cols), data(other.data) { std::cout << "Here"; }
 
 template <class T>
 Matrix<T>::Matrix() {}

@@ -1,25 +1,26 @@
-﻿
-#include <thread>
-#include <condition_variable>
+﻿#include <condition_variable>
 #include <mutex>
 #include <vector>
 #include <string>
 #include "sparseImageEncryption.h"
+#include <chrono>
+
+
+void myFunction(const char* message) {
+    // Function implementation
+}
+
 
 int main() {
 
-    cv::Mat img = cv::imread("test_image2.png", cv::IMREAD_COLOR);
-    uint32_t TILE_SIZE = 64;
+    StatusCallback myCallback;
+    myCallback = myFunction;
 
-    if (img.empty())
-    {
-        std::cout << "!!! Failed imread(): image not found" << std::endl;
-    }
-
-    encryptionImage img_encrypted = encryptImage(img, TILE_SIZE, "5v48v5832v5924", CPU_ACCELERATION);
-    cv::Mat out = decryptImage(img_encrypted, "5v48v5832v5924", GPU_ACCELERATION, 6, 300);
-    imshow("Display window", out);
-    cv::imwrite("test_image_decrypted.png", out);
-
+    std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
+    encryptAndWriteFile(myCallback, "test_image.png", "test_image.se", "5v48v5832v5924", 64, 2, 1, false);
+    decryptAndWriteFile(myCallback, "test_image.se", "test_image_decrypted.png", "5v48v5832v5924", 1, 1, 300, false);
+    std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
+    double solve_time = std::chrono::duration_cast<std::chrono::minutes>(t2 - t1).count();
+    std::cout << solve_time << std::endl;
     return 1;
 }

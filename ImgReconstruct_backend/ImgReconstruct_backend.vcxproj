@@ -83,8 +83,8 @@
     <LibraryPath>C:\opencv\build\x64\vc16\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <IncludePath>C:\opencv\build\include;$(IncludePath)</IncludePath>
-    <LibraryPath>C:\opencv\build\x64\vc16\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>C:\Users\iorda\Downloads\ncnn-20240820-windows-vs2022-shared\ncnn-20240820-windows-vs2022-shared\x64\include;C:\opencv\build\include;C:\Program Files\AMD\AOCL-Windows\amd-blis\include;$(IncludePath)</IncludePath>
+    <LibraryPath>C:\opencv\build\x64\vc16\lib;C:\Users\iorda\Downloads\ncnn-20240820-windows-vs2022-shared\ncnn-20240820-windows-vs2022-shared\x64\lib;C:\Program Files\AMD\AOCL-Windows\amd-blis\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -129,14 +129,15 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <OpenMPSupport>true</OpenMPSupport>
-      <AdditionalIncludeDirectories>C:\Users\iorda\Downloads\CLBlast-1.6.2-windows-x64\CLBlast-1.6.2-windows-x64\CLBlast-1.6.2-windows-x64\include;C:\Program Files %28x86%29\AMD APP SDK\3.0\include;C:\opencv\opencv\build\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\iorda\Downloads\CLBlast-1.6.2-windows-x64\CLBlast-1.6.2-windows-x64\CLBlast-1.6.2-windows-x64\include;C:\Program Files %28x86%29\AMD APP SDK\3.0\include;C:\opencv\opencv\build\include;C:\Program Files\AMD\AOCL-Windows\amd-blis\include\ILP64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>opencv_world490d.lib;OpenCL.lib;clblast.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>C:\Users\iorda\Downloads\CLBlast-1.6.2-windows-x64\CLBlast-1.6.2-windows-x64\CLBlast-1.6.2-windows-x64\lib;C:\Program Files %28x86%29\AMD APP SDK\3.0\lib\x86_64;C:\opencv\opencv\build\x64\vc16\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>C:\Users\iorda\Downloads\CLBlast-1.6.2-windows-x64\CLBlast-1.6.2-windows-x64\CLBlast-1.6.2-windows-x64\lib;C:\Program Files %28x86%29\AMD APP SDK\3.0\lib\x86_64;C:\opencv\opencv\build\x64\vc16\lib;C:\Program Files\AMD\AOCL-Windows\amd-blis\lib\ILP64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -148,15 +149,16 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <OpenMPSupport>true</OpenMPSupport>
-      <AdditionalIncludeDirectories>C:\Program Files %28x86%29\AMD APP SDK\3.0\include;C:\opencv\opencv\build\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Program Files %28x86%29\AMD APP SDK\3.0\include;C:\opencv\opencv\build\include;C:\ncnn\include;C:\Users\iorda\Downloads\glslang-master-windows-Release\include;C:\Program Files\AMD\AOCL-Windows\amd-blis\include\ILP64;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>opencv_world490.lib;OpenCL.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>C:\Program Files %28x86%29\AMD APP SDK\3.0\lib\x86_64;C:\opencv\opencv\build\x64\vc16\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencv_world490.lib;OpenCL.lib;ncnn.lib;glslang.lib;SPIRV.lib;OSDependent.lib;OGLCompiler.lib;MachineIndependent.lib;GenericCodeGen.lib;AOCL-LibBlis-Win.lib;AOCL-LibBlis-Win-dll.lib;AOCL-LibBlis-Win-MT.lib;AOCL-LibBlis-Win-MT-dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>C:\Program Files %28x86%29\AMD APP SDK\3.0\lib\x86_64;C:\opencv\opencv\build\x64\vc16\lib;C:\ncnn\lib;C:\Users\iorda\Downloads\glslang-master-windows-Release\lib;C:\Program Files\AMD\AOCL-Windows\amd-blis\lib\ILP64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

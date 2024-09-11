@@ -1,5 +1,6 @@
 #pragma once
-#include <CL/cl.h>
+//#include <CL/cl.h>
+#include <CL/cl.hpp>
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -19,15 +20,12 @@
 // porbably the fastest to use for the encryption step
 #define CPU_ACCELERATION 3 
 
-struct openCLContext {
-	cl_platform_id platform;
-	cl_device_id device;
-	cl_context context;
-	cl_command_queue queue;
-	cl_command_queue device_queue;
-	cl_program program;
-	cl_int err;
-};
+typedef void (*StatusCallback)(const char*);
 
-encryptionImage encryptImage(cv::Mat img, int TILE_SIZE, std::string passphrase, int acceleration, int threads = 1);
-cv::Mat decryptImage(encryptionImage img, std::string passphrase, int acceleration, int threads = 1, int iterations = 300, bool removeNoise = false);
+encryptionImage encryptImage(StatusCallback callback, cv::Mat img, int TILE_SIZE, std::string passphrase, int acceleration, int threads = 1);
+void decryptImage(StatusCallback callback, cv::Mat& img_out, encryptionImage img, std::string passphrase, int acceleration, int threads = 1, int iterations = 300, bool removeNoise = false, tile_range range = { 0, 0 });
+
+
+void encryptAndWriteFile(StatusCallback callback, const char* input, const char* output, const char* passphrase, int TILE_SIZE, int acceleration, int threads, bool upscaling_enable);
+void decryptAndWriteFile(StatusCallback callback, const char* input, const char* output, const char* passphrase, int acceleration, int threads, int iterations, bool removeNoise);
+void deleteOriginalImage(StatusCallback callback, const char* input, bool scramble);

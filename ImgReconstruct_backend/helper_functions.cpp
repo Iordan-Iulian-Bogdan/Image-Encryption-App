@@ -7,8 +7,10 @@
 
 void matrix_vector_mult_avx512(const std::vector<float>& matrix, const std::vector<float>& vector, std::vector<float>& result, size_t rows, size_t cols) {
 
-    int numThreads = omp_get_max_threads();
-    #pragma omp parallel for num_threads(numThreads) schedule(dynamic)
+    int numThreads = 12; // Number of cores
+    omp_set_num_threads(numThreads);
+
+    #pragma omp parallel for
     for (int64_t i = 0; i < rows; ++i) {
         __m512 vec_result = _mm512_setzero_ps();
         for (size_t j = 0; j < cols; j += 16) {
@@ -31,7 +33,7 @@ void matrix_vector_mult_avx512(const std::vector<float>& matrix, const std::vect
 void matrix_mult_avx512(const std::vector<float>& matrixA, const std::vector<float>& matrixB, std::vector<float>& result, size_t rowsA, size_t colsA, size_t colsB) {
 
     int numThreads = omp_get_max_threads();
-    #pragma omp parallel for num_threads(numThreads / 2) schedule(dynamic)
+#pragma omp parallel for num_threads(numThreads / 2) schedule(dynamic)
     for (int64_t i = 0; i < rowsA; ++i) {
         for (size_t j = 0; j < colsB; ++j) {
             __m512 vec_result = _mm512_setzero_ps();
@@ -166,4 +168,47 @@ int retAvailableTile(std::vector<int>& array_of_images) {
     else {
         return -1;
     }
+}
+
+void writeToFile(const std::string& filename, const encryptionImage& img) {
+    std::ofstream outFile(filename, std::ios::binary);
+    if (!outFile) {
+        std::cerr << "Could not open the file for writing!" << std::endl;
+        return;
+    }
+
+    outFile.write(reinterpret_cast<const char*>(&img.TILE_SIZE), sizeof(img.TILE_SIZE));
+    outFile.write(reinterpret_cast<const char*>(&img.num_tiles), sizeof(img.num_tiles));
+    outFile.write(reinterpret_cast<const char*>(&img.original_width), sizeof(img.original_width));
+    outFile.write(reinterpret_cast<const char*>(&img.original_height), sizeof(img.original_height));
+    outFile.write(reinterpret_cast<const char*>(&img.processed_width), sizeof(img.processed_width));
+    outFile.write(reinterpret_cast<const char*>(&img.processed_height), sizeof(img.processed_height));
+
+    size_t dataSize = img.data_array.size();
+    outFile.write(reinterpret_cast<const char*>(&dataSize), sizeof(dataSize));
+    outFile.write(reinterpret_cast<const char*>(img.data_array.data()), dataSize * sizeof(float));
+
+    outFile.close();
+}
+
+void readFromFile(const std::string& filename, encryptionImage& img) {
+    std::ifstream inFile(filename, std::ios::binary);
+    if (!inFile) {
+        std::cerr << "Could not open the file for reading!" << std::endl;
+        return;
+    }
+
+    inFile.read(reinterpret_cast<char*>(&img.TILE_SIZE), sizeof(img.TILE_SIZE));
+    inFile.read(reinterpret_cast<char*>(&img.num_tiles), sizeof(img.num_tiles));
+    inFile.read(reinterpret_cast<char*>(&img.original_width), sizeof(img.original_width));
+    inFile.read(reinterpret_cast<char*>(&img.original_height), sizeof(img.original_height));
+    inFile.read(reinterpret_cast<char*>(&img.processed_width), sizeof(img.processed_width));
+    inFile.read(reinterpret_cast<char*>(&img.processed_height), sizeof(img.processed_height));
+
+    size_t dataSize;
+    inFile.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize));
+    img.data_array.resize(dataSize);
+    inFile.read(reinterpret_cast<char*>(img.data_array.data()), dataSize * sizeof(float));
+
+    inFile.close();
 }

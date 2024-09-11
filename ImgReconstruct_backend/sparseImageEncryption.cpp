@@ -1,65 +1,213 @@
 #include "sparseImageEncryption.h"
 #include "AVX_functions.h"
+#include <cblas.h>
+#include <future>
+#include <queue>
+#include <bitset>
+#include <chrono>
 
 std::mutex mtx_tile;
-std::mutex write_measurment;
 
-void createOpenCLcontext(openCLContext& cl_data, string device_name) {
-	cl_uint numPlatforms = 0;
-	clGetPlatformIDs(0, NULL, &numPlatforms);
-	std::vector<cl_platform_id> platforms(numPlatforms);
-	clGetPlatformIDs(numPlatforms, platforms.data(), NULL);
-	cl_uint numDevices = 0;
-	cl_device_id device;
-	std::vector<cl_device_id> devices;
-	for (cl_uint i = 0; i < numPlatforms; ++i) {
+std::mutex mtx_print;
 
-		cl_uint numDevices = 0;
-		clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
+std::mutex mtx_cores;
 
-		// Get device IDs
-		devices.resize(numDevices);
-		clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, numDevices, devices.data(), NULL);
+int message_done = 0;
+std::mutex mtx;
+std::condition_variable done_variable;
 
-		for (cl_uint j = 0; j < numDevices; ++j) {
-			// Display device information
-			char deviceName[1024];
-			clGetDeviceInfo(devices[j], CL_DEVICE_NAME, sizeof(deviceName), deviceName, NULL);
-			
-			string strdata = deviceName;
-			strdata = strdata.substr(0, 8);
+int count_g = 0;
 
-			if (strdata == device_name) {
-				cl_data.device = devices[j];
-				cl_data.platform = platforms[i];
-			}
+vector<vector<float>> eks_global;
 
+std::vector<string> cores(std::thread::hardware_concurrency(), "Empty");
+
+int num_tiles = 0;
+int processed_tiles = 0;
+std::mutex mtx_processed_tiles;
+
+static vector<vector<float>> eksd;
+
+// returns the index of a core where nothing has been scheduled on it yet
+unsigned long get_free_core(string source) {
+
+	std::random_device dev;
+	std::mt19937 rng(dev());
+	std::uniform_int_distribution<std::mt19937::result_type> dist(0, cores.size() - 1); 
+
+	bool foundFreeCore = false;
+	bool atLaestOneCoreFree = false;
+
+	// checking if at least one core is empty, if none are we just return a random index
+	// this should only happen on very low core count CPUs
+	for (int i = 0; i < cores.size(); i++) {
+		if (cores[i] == "Empty") {
+			atLaestOneCoreFree = true;
 		}
 	}
 
-	cl_data.context = clCreateContext(NULL, 1, &cl_data.device, NULL, NULL, &cl_data.err);
-	cl_queue_properties properties[] = { CL_QUEUE_PROPERTIES, (cl_command_queue_properties)(CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_ON_DEVICE | CL_QUEUE_ON_DEVICE_DEFAULT), 0 };
-
-	cl_data.queue = clCreateCommandQueueWithProperties(cl_data.context, cl_data.device, 0, &cl_data.err);
-
-	cl_data.device_queue = clCreateCommandQueueWithProperties(cl_data.context, cl_data.device, properties, &cl_data.err);
-
-	std::ifstream kernelFile("gpu_kernels.cl");
-
-	if (!kernelFile.is_open()) {
-		std::cerr << "Failed to open kernel file." << std::endl;
+	if (!atLaestOneCoreFree)
+	{
+		return 1 << dist(rng);
 	}
 
-	std::string kernelSource((std::istreambuf_iterator<char>(kernelFile)), std::istreambuf_iterator<char>());
-	const char* sources = kernelSource.data();
-	cl_data.program = clCreateProgramWithSource(cl_data.context, 1, &sources, NULL, &cl_data.err);
-	const char options[] = "-cl-std=CL2.0";
-	clBuildProgram(cl_data.program, 1, &cl_data.device, options, NULL, NULL);
+	while (!foundFreeCore) {
+		int index = dist(rng);
+
+		// we only pick every other core to account for SMT/HT, it might be slower if two threds run on the same physical core
+		if (cores[index] == "Empty" && index % 2 != 0)
+		{
+			cores[index] = source;
+			foundFreeCore = true;
+			mtx_print.lock();
+			for (int i = 0; i < cores.size(); i++) {
+				//std::cout << cores[i] << " " << i<<" "<<std::endl;
+			}
+			mtx_print.unlock();
+			return 1 << index;
+		}
+	}
 }
 
-std::vector <float> ADM_gpu(map<string, std::vector<float>>& buffers,
-	int A_cols, int A_rows, float max_eig, float beta, float tau, int iterations, int index1, int index2)
+vector<vector<float>> fill_eks(int n) {
+
+	vector<vector<float>> eks_aux(n, vector<float>(n));
+	vector<float> ek(n);
+	vector<float> psi(n);
+
+	vec_fill(ek, 0.0f);
+	vec_fill(psi, 0.0f);
+
+	for (int i = 0; i < n; i++)
+	{
+		vec_fill(ek, 0.0f);
+		ek[i] = 1.0f;
+		cv::idct(ek, psi, 0);
+		eks_aux[i] = psi;
+	}
+
+	return eks_aux;
+}
+
+// used to send messeges to the python code
+void send_messege(StatusCallback callback, string s) {
+	char message[50];
+	sprintf(message, s.c_str());
+	callback(message);
+}
+
+
+void generateIDCT(vector<float>& IDCT, int n)
 {
+	vector<float> ek(n);
+	vector<float> psi(n);
+
+	int numThreads = omp_get_max_threads();
+	#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
+	for (int i = 0; i < n; i++)
+	{
+		vec_fill(ek, 0.0f);
+		ek[i] = 1.0f;
+		cv::idct(ek, psi, 0);
+
+		for (int k = 0; k < n; k = k + 16)
+		{
+			_mm512_storeu_ps(&IDCT[(i * n) + k], _mm512_loadu_ps(&psi[k]));
+		}
+	}
+}
+
+float generate_dictionary(map<string, cl::Buffer>& buffers_gpu, cl::Context context, cl::CommandQueue queue, map<string, cl::Kernel> kernels, uint32_t size, cl::Device device, cl::Program program, float seed = 1) {
+	cl_int err;
+
+	int width = size;
+	int height = size;
+	int n = width * height;
+	int m = n;
+	int T = 12;
+	int k = 0;
+
+	buffers_gpu["buffer_A"] = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(float) * n * m);
+
+	k = 0;
+	float sum = 0.0f;
+
+	vector<float> IDCT_alt(n * n, 0.0f);
+	generateIDCT(IDCT_alt, n);
+	Matrix<float> transpose(n, n);
+	transpose.data = IDCT_alt;
+	transpose.data = transpose.getTransposedMatrix().data;
+	buffers_gpu["buffer_IDCT"] = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(float) * IDCT_alt.size());
+	queue.enqueueWriteBuffer(buffers_gpu["buffer_IDCT"], CL_TRUE, 0, sizeof(float) * IDCT_alt.size(), transpose.data.data());
+	IDCT_alt = std::vector<float>();
+	transpose.data = std::vector<float>();
+	queue.finish();
+
+	const int TS = 32;
+	const int WPT = 8;
+
+	kernels["mat_mat_mul_gpu_sp"].setArg(0, m);
+	kernels["mat_mat_mul_gpu_sp"].setArg(1, n);
+	kernels["mat_mat_mul_gpu_sp"].setArg(2, buffers_gpu["buffer_IDCT"]);
+	kernels["mat_mat_mul_gpu_sp"].setArg(3, buffers_gpu["buffer_phi"]);
+	kernels["mat_mat_mul_gpu_sp"].setArg(4, buffers_gpu["buffer_A"]);
+	err = queue.enqueueNDRangeKernel(kernels["mat_mat_mul_gpu_sp"], cl::NullRange, cl::NDRange(n, n / WPT), cl::NDRange(TS, TS / WPT));
+	queue.finish();
+	buffers_gpu["buffer_A_t"] = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(float) * n * m);
+
+	kernels["transpose"].setArg(0, buffers_gpu["buffer_A"]);
+	kernels["transpose"].setArg(1, buffers_gpu["buffer_A_t"]);
+	kernels["transpose"].setArg(2, n);
+	kernels["transpose"].setArg(3, m);
+	err = queue.enqueueNDRangeKernel(kernels["transpose"], cl::NullRange, cl::NDRange(n, m), cl::NDRange(16, 16));
+	queue.finish();
+
+	// this is the maxium eigen value of the dictionary, it's neeed for the algorithm that is used to reconstruct the original signal
+	//float max_eig = generate_max_eig(context, queue, buffers, kernels, m, n);
+	float max_eig = eigen_aprox_polynomial(width);
+
+	float f = 0.000001f;
+	///size_t globalSize_scalar_mul = n * m;
+
+	kernels["vec_scalar_gpu_sp"].setArg(0, buffers_gpu["buffer_A_t"]);
+	kernels["vec_scalar_gpu_sp"].setArg(1, 0.000001f);
+	queue.enqueueNDRangeKernel(kernels["vec_scalar_gpu_sp"], cl::NullRange, cl::NDRange(n * m));
+	queue.finish();
+
+	return max_eig;
+}
+
+void createOpenCLcontext(openCLContext& cl_data, string device_name) {
+
+	std::vector<cl::Platform> all_platforms;
+	cl::Platform::get(&all_platforms);
+	cl::Platform default_platform = all_platforms[0];
+	std::vector<cl::Device> all_devices;
+	default_platform.getDevices(CL_DEVICE_TYPE_GPU, &all_devices);
+	cl::Device default_device = all_devices[0];
+	cl::Context context(default_device);
+	std::ifstream src("gpu_kernels.cl");
+	std::string str((std::istreambuf_iterator<char>(src)), std::istreambuf_iterator<char>());
+	cl::Program::Sources sources;
+	sources.push_back({ str.c_str(),str.length() });
+	cl::Program program(context, sources);
+	program.build({ default_device });
+	cl::CommandQueue queue(context, default_device);
+
+	cl_data.context = context;
+	cl_data.device = default_device;
+	cl_data.platform = default_platform;
+	cl_data.queue = queue;
+	cl_data.program = program;
+}
+
+// sparse representation solver that runs on the CPU
+// decrypts the data by solving the 'A * x = b' equation, where 'x' is the unkown decrypted singal and 'b' is the known encrypted signal 
+// uses Alternating Direction Method optimization algorithm
+void ADM_cpu(map<string, std::vector<float>>& buffers,
+	int A_cols, int A_rows, float max_eig, float beta, float tau, int iterations, int index1, int index2, std::vector<float>& sol)
+{
+
 	int n = A_cols;
 	int m = A_rows;
 
@@ -72,139 +220,68 @@ std::vector <float> ADM_gpu(map<string, std::vector<float>>& buffers,
 
 	for (int i = 0; i < iterations; i++)
 	{
-		matrix_vector_mult_avx512(buffers["buffer_A"], buffer_x, buffer_res, n, m);
+		cblas_sgemv(CblasColMajor, CblasTrans, n, n, 1.0, buffers["buffer_A"].data(), n, buffer_x.data(), 1, 0.0, buffer_res.data(), 1);
+		vec_sub_avx(buffer_res, buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)], 1);
 		vec_sub_avx(buffer_res, buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)], 1);
 		vec_scalar_avx(buffer_y, (1 / beta), 1);
 		vec_sub_avx(buffer_res, buffer_y, 1);
-		matrix_vector_mult_avx512(buffers["buffer_A_t"], buffer_res, buffer_res_aux, n, m);
+		cblas_sgemv(CblasColMajor, CblasTrans, n, n, 1.0, buffers["buffer_A_t"].data(), n, buffer_res.data(), 1, 0.0, buffer_res_aux.data(), 1);
 		vec_sub_avx(buffer_x, buffer_res_aux, 1);
 		shrink(buffer_x, (tau / beta), 1);
-		matrix_vector_mult_avx512(buffers["buffer_A"], buffer_x, buffer_res_aux, n, m);
+		cblas_sgemv(CblasColMajor, CblasTrans, n, n, 1.0, buffers["buffer_A"].data(), n, buffer_x.data(), 1, 0.0, buffer_res_aux.data(), 1);
 		vec_sub_avx(buffer_res_aux, buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)], 1);
 		vec_scalar_avx(buffer_res_aux, (gamma * beta), 1);
 		vec_scalar_avx(buffer_y, (1 / (1 / beta)), 1);
 		vec_sub_avx(buffer_y, buffer_res_aux, 1);
 	}
 
-	return buffer_x;
+	sol = buffer_x;
 }
 
-
+// sparse representation solver that runs on the CPU
 // decrypts the data by solving the 'A * x = b' equation, where 'x' is the unkown decrypted singal and 'b' is the known encrypted signal 
 // uses Alternating Direction Method optimization algorithm
-std::vector <float> ADM_gpu(map<string, cl_mem>& buffers,
+std::vector <float> ADM_gpu(map<string, cl::Buffer>& buffers,
 	int A_cols, int A_rows, float max_eig, float beta, float tau, int iterations,
-	openCLContext cl_data, map<string, cl_kernel> kernels, int index1, int index2)
+	openCLContext cl_data, map<string, cl::Kernel> kernels, int index1, int index2)
 {
-	cl_queue_properties properties[] = { CL_QUEUE_PROPERTIES, (cl_command_queue_properties)(CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_ON_DEVICE | CL_QUEUE_ON_DEVICE_DEFAULT), 0 };
-
 	int n = A_cols;
 	int m = A_rows;
-
 	int err = 0;
-	size_t globalSize_m[2] = { m, 1 };
-	size_t globalSize_n[2] = { n, 1 };
-
 	float gamma = 1.99f - (tau * max_eig);
 	float f = 0.0f;
-
 	std::vector<float> x1(n);
 
-	buffers["buffer_res" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * n, NULL, NULL);
-	buffers["buffer_y" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * m, NULL, NULL);
-	buffers["buffer_x" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * n, NULL, NULL);
-	buffers["buffer_res_aux" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * n, NULL, NULL);
-	buffers["buffer_count" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(int), NULL, NULL);
-	clFinish(cl_data.queue);
-
-
-	size_t globalSize_g[1] = { 1 };
-	cl_event event1;
+	cl::Buffer buffer_res(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * n, NULL, NULL);
+	cl::Buffer buffer_y(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * m);
+	cl::Buffer buffer_x(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * n);
+	cl::Buffer buffer_res_aux(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * n);
+	cl_data.queue.finish();
 
 	for (int i = 0; i < iterations; i++)
 	{
-
-		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 0, sizeof(cl_mem), &buffers["buffer_A"]);
-		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 1, sizeof(cl_mem), &buffers["buffer_x" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 2, sizeof(cl_mem), &buffers["buffer_res" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 3, sizeof(int), &m);
-		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 4, sizeof(int), &n);
-		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["mat_vec_mul_gpu_fp32"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(cl_data.queue);
-
-		clSetKernelArg(kernels["vec_sub_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_res" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		clSetKernelArg(kernels["vec_sub_gpu_sp"], 1, sizeof(cl_mem), &buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_sub_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(cl_data.queue);
-
-		f = (1 / beta);
-		clSetKernelArg(kernels["vec_scalar_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_y" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		clSetKernelArg(kernels["vec_scalar_gpu_sp"], 1, sizeof(float), &f);
-		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_scalar_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(cl_data.queue);
-
-		clSetKernelArg(kernels["vec_sub_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_res" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		clSetKernelArg(kernels["vec_sub_gpu_sp"], 1, sizeof(cl_mem), &buffers["buffer_y" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_sub_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(cl_data.queue);
-
-		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 0, sizeof(cl_mem), &buffers["buffer_A_t"]);
-		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 1, sizeof(cl_mem), &buffers["buffer_res" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 2, sizeof(cl_mem), &buffers["buffer_res_aux" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 3, sizeof(int), &n);
-		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 4, sizeof(int), &m);
-		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["mat_vec_mul_gpu_fp32"], 1, NULL, globalSize_n, NULL, 0, NULL, NULL);
-		clFinish(cl_data.queue);
-
-		clSetKernelArg(kernels["vec_sub_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_x" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		clSetKernelArg(kernels["vec_sub_gpu_sp"], 1, sizeof(cl_mem), &buffers["buffer_res_aux" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_sub_gpu_sp"], 1, NULL, globalSize_n, NULL, 0, NULL, NULL);
-		clFinish(cl_data.queue);
-
-		f = (tau / beta);
-		clSetKernelArg(kernels["shrink_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_x" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		clSetKernelArg(kernels["shrink_gpu_sp"], 1, sizeof(float), &f);
-		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["shrink_gpu_sp"], 1, NULL, globalSize_n, NULL, 0, NULL, NULL);
-		clFinish(cl_data.queue);
-
-		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 0, sizeof(cl_mem), &buffers["buffer_A"]);
-		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 1, sizeof(cl_mem), &buffers["buffer_x" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 2, sizeof(cl_mem), &buffers["buffer_res_aux" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 3, sizeof(int), &m);
-		clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 4, sizeof(int), &n);
-		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["mat_vec_mul_gpu_fp32"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(cl_data.queue);
-
-		clSetKernelArg(kernels["vec_sub_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_res_aux" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		clSetKernelArg(kernels["vec_sub_gpu_sp"], 1, sizeof(cl_mem), &buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_sub_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(cl_data.queue);
-
-		f = (gamma * beta);
-		clSetKernelArg(kernels["vec_scalar_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_res_aux" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		clSetKernelArg(kernels["vec_scalar_gpu_sp"], 1, sizeof(float), &f);
-		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_scalar_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(cl_data.queue);
-
-		f = (1 / (1 / beta));
-		clSetKernelArg(kernels["vec_scalar_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_y" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		clSetKernelArg(kernels["vec_scalar_gpu_sp"], 1, sizeof(float), &f);
-		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_scalar_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(cl_data.queue);
-
-		clSetKernelArg(kernels["vec_sub_gpu_sp"], 0, sizeof(cl_mem), &buffers["buffer_y" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		clSetKernelArg(kernels["vec_sub_gpu_sp"], 1, sizeof(cl_mem), &buffers["buffer_res_aux" + std::to_string(index1) + "_" + std::to_string(index2)]);
-		err = clEnqueueNDRangeKernel(cl_data.queue, kernels["vec_sub_gpu_sp"], 1, NULL, globalSize_m, NULL, 0, NULL, NULL);
-		clFinish(cl_data.queue);
+		mat_vec_mul_GPU(buffers["buffer_A"], buffer_x, buffer_res, m, n, cl_data, kernels);
+		vec_sub_GPU(buffer_res, buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)], m, cl_data, kernels);
+		vec_scalar_GPU(buffer_y, (1 / beta), m, cl_data, kernels);
+		vec_sub_GPU(buffer_res, buffer_y, m, cl_data, kernels);
+		mat_vec_mul_GPU(buffers["buffer_A_t"], buffer_res, buffer_res_aux, n, m, cl_data, kernels);
+		vec_sub_GPU(buffer_x, buffer_res_aux, m, cl_data, kernels);
+		shrink_GPU(buffer_x, (tau / beta), n, cl_data, kernels);
+		mat_vec_mul_GPU(buffers["buffer_A"], buffer_x, buffer_res_aux, m, n, cl_data, kernels);
+		vec_sub_GPU(buffer_res_aux, buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)], m, cl_data, kernels);
+		vec_scalar_GPU(buffer_res_aux, (gamma * beta), m, cl_data, kernels);
+		vec_scalar_GPU(buffer_y, (1 / (1 / beta)), m, cl_data, kernels);
+		vec_sub_GPU(buffer_y, buffer_res_aux, m, cl_data, kernels);
 	}
 
-	clEnqueueReadBuffer(cl_data.queue, buffers["buffer_x" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * x1.size(), x1.data(), 0, NULL, NULL);
-	clFinish(cl_data.queue);
+	cl_data.queue.enqueueReadBuffer(buffer_x, CL_TRUE, 0, sizeof(float) * x1.size(), x1.data());
+	cl_data.queue.finish();
 
 	return x1;
 }
 
-void decrypt_data(cv::Mat& out, map<string, cl_mem>& buffers, openCLContext cl_data, map<string, cl_kernel> kernels, uint32_t tile_size, float max_eig, int index1, int index2, int iterations) {
+// this recontructs an image tile
+void decrypt_data(cv::Mat& out, map<string, cl::Buffer>& buffers, openCLContext cl_data, map<string, cl::Kernel> kernels, uint32_t tile_size, vector<float>& sol_alt, float max_eig, int index1, int index2, int iterations) {
 	cl_int err;
 
 	cv::Mat img = cv::Mat::zeros(cv::Size(tile_size, tile_size), CV_8U);
@@ -227,21 +304,22 @@ void decrypt_data(cv::Mat& out, map<string, cl_mem>& buffers, openCLContext cl_d
 	float beta = 0.000001f;
 	float tau = 0.000001f;
 
-	vector<float>sol_alt = ADM_gpu(buffers, n, m, max_eig, beta, tau, iterations, cl_data, kernels, index1, index2);
-
 	s1 = sol_alt;
 	float o = s1[n - 1];
 	vec_fill(x1, 0.0f);
 	vec_fill(ek, 0.0f);
 	vec_fill(psi, 0.0f);
 
+	// the contents of eksd are initially always the same so we can compute this just once, 
+	// we need to make a copy becasuse this variable will be modified afterwards,
+	// it's worth making a copy every time because it's still faster than computing it every time
+
+	vector<vector<float>> eks = eksd;
+
 	for (int i = 0; i < n; i++)
 	{
-		vec_fill(ek, 0.0f);
-		ek[i] = 1.0f;
-		cv::idct(ek, psi, 0);
-		vec_scalar_avx(psi, s1[i], T);
-		vec_add_avx(x1, psi, T);
+		vec_scalar_avx(eks[i], s1[i], 1);
+		vec_add_avx(x1, eks[i], 1);
 	}
 
 	k = 0;
@@ -259,149 +337,69 @@ void decrypt_data(cv::Mat& out, map<string, cl_mem>& buffers, openCLContext cl_d
 	out = reconstructedImg;
 }
 
-void decrypt_image(cv::Mat& out, map<string, cl_mem>& buffers, uint32_t TILE_SIZE, float max_eig, int index, int iterations) {
-
-	// initializing opencl context
-	openCLContext cl_data{ NULL, NULL, NULL, NULL, NULL, NULL, 0 };
-	createOpenCLcontext(cl_data, "gfx1100");
-
-	map<string, cl_kernel> kernels;
-
-	kernels["transpose"] = clCreateKernel(cl_data.program, "transpose", &cl_data.err);
-	kernels["mat_mat_mul_gpu_sp"] = clCreateKernel(cl_data.program, "mat_mat_mul_gpu_sp", &cl_data.err);
-	kernels["power_method"] = clCreateKernel(cl_data.program, "power_method", &cl_data.err);
-	kernels["mat_vec_mul_gpu_fp32"] = clCreateKernel(cl_data.program, "mat_vec_mul_gpu_fp32", &cl_data.err);
-	kernels["vec_scalar_gpu_sp"] = clCreateKernel(cl_data.program, "vec_scalar_gpu_sp", &cl_data.err);
-	kernels["vec_sub_gpu_sp"] = clCreateKernel(cl_data.program, "vec_sub_gpu_sp", &cl_data.err);
-	kernels["shrink_gpu_sp"] = clCreateKernel(cl_data.program, "shrink_gpu_sp", &cl_data.err);
-	kernels["ADM"] = clCreateKernel(cl_data.program, "ADM", &cl_data.err);
-
+void decrypt_data_gpu(StatusCallback callback, cv::Mat out, map<string, cl::Buffer> buffers, openCLContext cl_data, map<string, cl::Kernel> kernels, int TILE_SIZE, vector<vector<float>> sol_alts, float max_eig, int index, int iterations) {
 	cv::Mat channels[3];
 	cv::split(out, channels);
 
 	for (int i = 0; i < 3; i++) {
-		decrypt_data(channels[i], buffers, cl_data, kernels, TILE_SIZE, max_eig, index, i, iterations);
+		decrypt_data(channels[i], buffers, cl_data, kernels, TILE_SIZE, sol_alts[i], max_eig, index, i, iterations);
 	}
 
 	cv::merge(channels, 3, out);
 
-	clReleaseCommandQueue(cl_data.queue);
-	clReleaseContext(cl_data.context);
-	clReleaseDevice(cl_data.device);
-	clReleaseCommandQueue(cl_data.device_queue);
-	clReleaseProgram(cl_data.program);
-
-	for (int i = 0; i < 3; i++) {
-		clReleaseMemObject(buffers["buffer_res" + std::to_string(index) + "_" + std::to_string(i)]);
-		clReleaseMemObject(buffers["buffer_y" + std::to_string(index) + "_" + std::to_string(i)]);
-		clReleaseMemObject(buffers["buffer_x" + std::to_string(index) + "_" + std::to_string(i)]);
-		clReleaseMemObject(buffers["buffer_res_aux" + std::to_string(index) + "_" + std::to_string(i)]);
-		clReleaseMemObject(buffers["buffer_count" + std::to_string(index) + "_" + std::to_string(i)]);
-	}
-
-	for (auto i = kernels.begin(); i != kernels.end(); i++)
-		clReleaseKernel(i->second);
-
 	std::cout << "GPU decrypted tile " + std::to_string(index) + "\n";
+	string s = "GPU decrypted tile " + std::to_string(index);
+	std::thread t(send_messege, callback, s);
+	t.detach();
+
+	// incrementing the number of tiles that have finished decrypting 
+	// when all tiles have been decrypted we notify the main thread since this thread has been detached from it
+	mtx_processed_tiles.lock();
+	processed_tiles++;
+	mtx_processed_tiles.unlock();
+
+	if (num_tiles == processed_tiles) {
+		message_done = 1;
+		done_variable.notify_one();
+	}
 }
 
-void generateIDCT(vector<float>& IDCT, int n)
-{
-	vector<float> ek(n);
-	vector<float> psi(n);
+void decrypt_image_gpu(openCLContext cl_data, StatusCallback callback, cv::Mat& out, map<string, cl::Buffer>& buffers, uint32_t TILE_SIZE, float max_eig, int index, int iterations) {
 
-	int numThreads = omp_get_max_threads();
-	//#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
-	for (int i = 0; i < n; i++)
-	{
-		vec_fill(ek, 0.0f);
-		ek[i] = 1.0f;
-		cv::idct(ek, psi, 0);
+	map<string, cl::Kernel> kernels;
 
-		for (int k = 0; k < n; k = k + 16)
-		{
-			_mm512_storeu_ps(&IDCT[(i * n) + k], _mm512_loadu_ps(&psi[k]));
-		}
+	kernels["transpose"] = cl::Kernel(cl_data.program, "transpose");
+	kernels["mat_mat_mul_gpu_sp"] = cl::Kernel(cl_data.program, "mat_mat_mul_gpu_sp");
+	kernels["mat_vec_mul_gpu_fp32"] = cl::Kernel(cl_data.program, "mat_vec_mul_gpu_fp32");
+	kernels["vec_scalar_gpu_sp"] = cl::Kernel(cl_data.program, "vec_scalar_gpu_sp");
+	kernels["vec_sub_gpu_sp"] = cl::Kernel(cl_data.program, "vec_sub_gpu_sp");
+	kernels["shrink_gpu_sp"] = cl::Kernel(cl_data.program, "shrink_gpu_sp");
+
+	float beta = 0.000001f;
+	float tau = 0.000001f;
+
+	int n = TILE_SIZE * TILE_SIZE;
+
+
+	vector<vector<float>> sol_alts(3, vector<float>(n));
+	std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
+
+	for (int i = 0; i < 3; i++) {
+		sol_alts[i] = ADM_gpu(buffers, n, n, max_eig, beta, tau, iterations, cl_data, kernels, index, i);
 	}
+
+	std::thread thread_decrypt_GPU(decrypt_data_gpu, callback, out, buffers, cl_data, kernels, TILE_SIZE, sol_alts, max_eig, index, iterations);
+	mtx_cores.lock();
+	static long core_decrypt_data_gpu = get_free_core("decrypt_data_gpu");
+	SetThreadAffinityMask(thread_decrypt_GPU.native_handle(), core_decrypt_data_gpu);
+	mtx_cores.unlock();
+	// what needs to be calculated in decrypt_data_gpu blocks the execution of the next tile but we don't actually need to wait for this 
+	// so we can detach the thread at this point
+	thread_decrypt_GPU.detach();
 }
 
 // the dictionary is generated by multiplying the encryption matrix
 // with a matrix composed of inverse cosine transforms for every position in the encrypted signal
-float generate_dictionary(map<string, cl_mem>& buffers_gpu, cl_context context, cl_command_queue queue, map<string, cl_kernel> kernels, uint32_t size, cl_device_id device, cl_program program, float seed = 1) {
-	cl_int err;
-
-	int width = size;
-	int height = size;
-	size_t n = width * height;
-	size_t m = n;
-	int T = 12;
-	int k = 0;
-
-	buffers_gpu["buffer_A"] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * n * m, NULL, NULL);
-
-	k = 0;
-	float sum = 0.0f;
-
-	vector<float> IDCT_alt(n * n, 0.0f);
-	generateIDCT(IDCT_alt, n);
-	Matrix<float> transpose(n, n);
-	transpose.data = IDCT_alt;
-	transpose.data = transpose.getTransposedMatrix().data;
-	buffers_gpu["buffer_IDCT"] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * IDCT_alt.size(), NULL, NULL);
-	clEnqueueWriteBuffer(queue, buffers_gpu["buffer_IDCT"], CL_TRUE, 0, sizeof(float) * IDCT_alt.size(), transpose.data.data(), 0, NULL, NULL);
-	IDCT_alt = std::vector<float>();
-	transpose.data = std::vector<float>();
-	clFinish(queue);
-
-	size_t globalSize[1] = { m };
-
-
-	const int TS = 32;
-	const int WPT = 8;
-
-	clSetKernelArg(kernels["mat_mat_mul_gpu_sp"], 0, sizeof(int), &m);
-	clSetKernelArg(kernels["mat_mat_mul_gpu_sp"], 1, sizeof(int), &n);
-	clSetKernelArg(kernels["mat_mat_mul_gpu_sp"], 2, sizeof(cl_mem), &buffers_gpu["buffer_IDCT"]);
-	clSetKernelArg(kernels["mat_mat_mul_gpu_sp"], 3, sizeof(cl_mem), &buffers_gpu["buffer_phi"]);
-	clSetKernelArg(kernels["mat_mat_mul_gpu_sp"], 4, sizeof(cl_mem), &buffers_gpu["buffer_A"]);
-
-	size_t globalSize1[2] = { (int)n, (int)n / WPT };
-	size_t localSize[2] = { TS, TS / WPT };
-
-
-	err = clEnqueueNDRangeKernel(queue, kernels["mat_mat_mul_gpu_sp"], 2, NULL, globalSize1, localSize, 0, NULL, NULL);
-	clFinish(queue);
-
-	buffers_gpu["buffer_A_t"] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * n * m, NULL, NULL);
-
-	clSetKernelArg(kernels["transpose"], 0, sizeof(cl_mem), &buffers_gpu["buffer_A"]);
-	clSetKernelArg(kernels["transpose"], 1, sizeof(cl_mem), &buffers_gpu["buffer_A_t"]);
-	clSetKernelArg(kernels["transpose"], 2, sizeof(int), &n);
-	clSetKernelArg(kernels["transpose"], 3, sizeof(int), &m);
-	size_t globalWorkSize[2] = { n, m };
-	size_t localWorkSize[2] = { 16, 16 };
-	err = clEnqueueNDRangeKernel(queue, kernels["transpose"], 2, NULL, globalWorkSize, localWorkSize, 0, NULL, NULL);
-	clFinish(queue);
-
-	vector<float> buffer_A(n * m);
-	clEnqueueReadBuffer(queue, buffers_gpu["buffer_A_t"], CL_TRUE, 0, sizeof(float) * buffer_A.size(), buffer_A.data(), 0, NULL, NULL);
-
-	// this is the maxium eigen value of the dictionary, it's neeed for the algorithm that is used to reconstruct the original signal
-	//float max_eig = generate_max_eig(context, queue, buffers, kernels, m, n);
-	float max_eig = eigen_aprox_polynomial(width);
-
-	float f = 0.000001f;
-	size_t globalSize_scalar_mul = n * m;
-	clSetKernelArg(kernels["vec_scalar_gpu_sp"], 0, sizeof(cl_mem), &buffers_gpu["buffer_A_t"]);
-	clSetKernelArg(kernels["vec_scalar_gpu_sp"], 1, sizeof(float), &f);
-	err = clEnqueueNDRangeKernel(queue, kernels["vec_scalar_gpu_sp"], 1, NULL, &globalSize_scalar_mul, NULL, 0, NULL, NULL);
-
-	clEnqueueReadBuffer(queue, buffers_gpu["buffer_A_t"], CL_TRUE, 0, sizeof(float) * buffer_A.size(), buffer_A.data(), 0, NULL, NULL);
-
-	clFinish(queue);
-
-	return max_eig;
-}
 
 float generate_dictionary(map<string, vector<float>>& buffers_cpu, uint32_t size, float seed = 1) {
 
@@ -423,25 +421,22 @@ float generate_dictionary(map<string, vector<float>>& buffers_cpu, uint32_t size
 
 	matrix_mult_avx512(transpose.data, buffers_cpu["buffer_phi"], buffer_A, n, m, n);
 
-	// buffer_A = buffer_IDCT * buffer_phi
-	// buffer_A_t
-
 	float max_eig = eigen_aprox_polynomial(width);
 
 	return max_eig;
 }
 
-float generate_dictionary(map<string, cl_mem>& buffers_gpu, map<string, vector<float>>& buffers_cpu, cl_context context, cl_command_queue queue, map<string, cl_kernel> kernels, uint32_t size, cl_device_id device, cl_program program, float seed = 1) {
-	cl_int err;
-
+float generate_dictionary(map<string, cl::Buffer>& buffers_gpu, map<string, vector<float>>& buffers_cpu, cl::Context context, cl::CommandQueue queue, map<string, cl::Kernel> kernels, uint32_t size, cl::Device device, cl::Program program, float seed = 1) {
+	int err = 0;
+	
 	int width = size;
 	int height = size;
-	size_t n = width * height;
-	size_t m = n;
+	int n = width * height;
+	int m = n;
 	int T = 12;
 	int k = 0;
 
-	buffers_gpu["buffer_A"] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * n * m, NULL, NULL);
+	buffers_gpu["buffer_A"] = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(float) * n * m);
 
 	k = 0;
 	float sum = 0.0f;
@@ -451,57 +446,49 @@ float generate_dictionary(map<string, cl_mem>& buffers_gpu, map<string, vector<f
 	Matrix<float> transpose(n, n);
 	transpose.data = IDCT_alt;
 	transpose.data = transpose.getTransposedMatrix().data;
-	buffers_gpu["buffer_IDCT"] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * IDCT_alt.size(), NULL, NULL);
-	clEnqueueWriteBuffer(queue, buffers_gpu["buffer_IDCT"], CL_TRUE, 0, sizeof(float) * IDCT_alt.size(), transpose.data.data(), 0, NULL, NULL);
+	buffers_gpu["buffer_IDCT"] = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(float) * IDCT_alt.size());
+	queue.enqueueWriteBuffer(buffers_gpu["buffer_IDCT"], CL_TRUE, 0, sizeof(float) * IDCT_alt.size(), transpose.data.data());
 	IDCT_alt = std::vector<float>();
 	transpose.data = std::vector<float>();
-	clFinish(queue);
-
-	size_t globalSize[1] = { m };
-
+	queue.finish();
 
 	const int TS = 32;
 	const int WPT = 8;
 
-	clSetKernelArg(kernels["mat_mat_mul_gpu_sp"], 0, sizeof(int), &m);
-	clSetKernelArg(kernels["mat_mat_mul_gpu_sp"], 1, sizeof(int), &n);
-	clSetKernelArg(kernels["mat_mat_mul_gpu_sp"], 2, sizeof(cl_mem), &buffers_gpu["buffer_IDCT"]);
-	clSetKernelArg(kernels["mat_mat_mul_gpu_sp"], 3, sizeof(cl_mem), &buffers_gpu["buffer_phi"]);
-	clSetKernelArg(kernels["mat_mat_mul_gpu_sp"], 4, sizeof(cl_mem), &buffers_gpu["buffer_A"]);
+	kernels["mat_mat_mul_gpu_sp"].setArg(0, m);
+	kernels["mat_mat_mul_gpu_sp"].setArg(1, n);
+	kernels["mat_mat_mul_gpu_sp"].setArg(2, buffers_gpu["buffer_IDCT"]);
+	kernels["mat_mat_mul_gpu_sp"].setArg(3, buffers_gpu["buffer_phi"]);
+	kernels["mat_mat_mul_gpu_sp"].setArg(4, buffers_gpu["buffer_A"]);
+	err = queue.enqueueNDRangeKernel(kernels["mat_mat_mul_gpu_sp"], cl::NullRange, cl::NDRange(n, n / WPT), cl::NDRange(TS, TS / WPT));
+	queue.finish();
+	buffers_gpu["buffer_A_t"] = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(float) * n * m);
 
-	size_t globalSize1[2] = { (int)n, (int)n / WPT };
-	size_t localSize[2] = { TS, TS / WPT };
-
-
-	err = clEnqueueNDRangeKernel(queue, kernels["mat_mat_mul_gpu_sp"], 2, NULL, globalSize1, localSize, 0, NULL, NULL);
-	clFinish(queue);
-
-	buffers_gpu["buffer_A_t"] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * n * m, NULL, NULL);
-
-	clSetKernelArg(kernels["transpose"], 0, sizeof(cl_mem), &buffers_gpu["buffer_A"]);
-	clSetKernelArg(kernels["transpose"], 1, sizeof(cl_mem), &buffers_gpu["buffer_A_t"]);
-	clSetKernelArg(kernels["transpose"], 2, sizeof(int), &n);
-	clSetKernelArg(kernels["transpose"], 3, sizeof(int), &m);
-	size_t globalWorkSize[2] = { n, m };
-	size_t localWorkSize[2] = { 16, 16 };
-	err = clEnqueueNDRangeKernel(queue, kernels["transpose"], 2, NULL, globalWorkSize, localWorkSize, 0, NULL, NULL);
-	clFinish(queue);
+	kernels["transpose"].setArg(0, buffers_gpu["buffer_A"]);
+	kernels["transpose"].setArg(1, buffers_gpu["buffer_A_t"]);
+	kernels["transpose"].setArg(2, n);
+	kernels["transpose"].setArg(3, m);
+	err = queue.enqueueNDRangeKernel(kernels["transpose"], cl::NullRange, cl::NDRange(n, m), cl::NDRange(16, 16));
+	queue.finish();
 
 	// this is the maxium eigen value of the dictionary, it's neeed for the algorithm that is used to reconstruct the original signal
+	//float max_eig = generate_max_eig(context, queue, buffers, kernels, m, n);
 	float max_eig = eigen_aprox_polynomial(width);
 
 	float f = 0.000001f;
-	size_t globalSize_scalar_mul = n * m;
-	clSetKernelArg(kernels["vec_scalar_gpu_sp"], 0, sizeof(cl_mem), &buffers_gpu["buffer_A_t"]);
-	clSetKernelArg(kernels["vec_scalar_gpu_sp"], 1, sizeof(float), &f);
-	err = clEnqueueNDRangeKernel(queue, kernels["vec_scalar_gpu_sp"], 1, NULL, &globalSize_scalar_mul, NULL, 0, NULL, NULL);
+	///size_t globalSize_scalar_mul = n * m;
 
+	kernels["vec_scalar_gpu_sp"].setArg(0, buffers_gpu["buffer_A_t"]);
+	kernels["vec_scalar_gpu_sp"].setArg(1, 0.000001f);
+	queue.enqueueNDRangeKernel(kernels["vec_scalar_gpu_sp"], cl::NullRange, cl::NDRange(n * m));
+	queue.finish();
 	vector<float> buffer_aux(n * m);
-	clEnqueueReadBuffer(queue, buffers_gpu["buffer_A"], CL_TRUE, 0, sizeof(float) * buffer_aux.size(), buffer_aux.data(), 0, NULL, NULL);
-	clFinish(queue);
+
+	queue.enqueueReadBuffer(buffers_gpu["buffer_A"], CL_TRUE, 0, sizeof(float) * buffer_aux.size(), buffer_aux.data());
+	queue.finish();
 	buffers_cpu["buffer_A"] = buffer_aux;
-	clEnqueueReadBuffer(queue, buffers_gpu["buffer_A_t"], CL_TRUE, 0, sizeof(float) * buffer_aux.size(), buffer_aux.data(), 0, NULL, NULL);
-	clFinish(queue);
+	queue.enqueueReadBuffer(buffers_gpu["buffer_A_t"], CL_TRUE, 0, sizeof(float) * buffer_aux.size(), buffer_aux.data());
+	queue.finish();
 	buffers_cpu["buffer_A_t"] = buffer_aux;
 
 	return max_eig;
@@ -509,20 +496,20 @@ float generate_dictionary(map<string, cl_mem>& buffers_gpu, map<string, vector<f
 
 // encrypts a segment of data by multiplying the vectorized monochromatic image with the encryption matrix
 // stores the encrypted data in the measurments vector
-void encrypt_data(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::vector<float>>& measurments, openCLContext& cl_data, map<string, cl_kernel> kernels, uint32_t tile_size, int index1, int index2)
+void encrypt_data(cv::Mat& img, map<string, cl::Buffer>& buffers, map<string, std::vector<float>>& measurments, openCLContext& cl_data, map<string, cl::Kernel> kernels, uint32_t tile_size, int index1, int index2)
 {
 	cl_int err;
 
 	int width = img.size[1];
 	int height = img.size[0];
-	size_t n = width * height;
-	size_t m = n;
+	int n = width * height;
+	int m = n;
 	int k = 0;
 	vector<float> res(m);
 	vector<float> x(n);
 	vector<float> x_aux(n);
 
-	buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * n, NULL, NULL);
+	buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)] = cl::Buffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * n);
 
 	cv::Mat floatImg;
 	img.convertTo(floatImg, CV_32FC1);
@@ -541,49 +528,39 @@ void encrypt_data(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::v
 
 	float sum = 0.0f;
 
-	buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * m, NULL, NULL);
+	buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = cl::Buffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * m);
 
 	size_t globalSize[1] = { m };
 
-	clEnqueueWriteBuffer(cl_data.queue, buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * x_aux.size(), x_aux.data(), 0, NULL, NULL);
+	cl_data.queue.enqueueWriteBuffer(buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * x_aux.size(), x_aux.data());
 
-	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 0, sizeof(cl_mem), &buffers["buffer_phi"]);
-	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 1, sizeof(cl_mem), &buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)]);
-	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 2, sizeof(cl_mem), &buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)]);
-	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 3, sizeof(int), &m);
-	clSetKernelArg(kernels["mat_vec_mul_gpu_fp32"], 4, sizeof(int), &n);
+	kernels["mat_vec_mul_gpu_fp32"].setArg(0, buffers["buffer_phi"]);
+	kernels["mat_vec_mul_gpu_fp32"].setArg(1, buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)]);
+	kernels["mat_vec_mul_gpu_fp32"].setArg(2, buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)]);
+	kernels["mat_vec_mul_gpu_fp32"].setArg(3, m);
+	kernels["mat_vec_mul_gpu_fp32"].setArg(4, n);
+	err = cl_data.queue.enqueueNDRangeKernel(kernels["mat_vec_mul_gpu_fp32"], cl::NullRange, cl::NDRange(m, 1));
+	cl_data.queue.finish();
 
-	err = clEnqueueNDRangeKernel(cl_data.queue, kernels["mat_vec_mul_gpu_fp32"], 1, NULL, globalSize, NULL, 0, NULL, NULL);
+	cl_data.queue.enqueueReadBuffer(buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * res.size(), res.data());
 
-	clEnqueueReadBuffer(cl_data.queue, buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * res.size(), res.data(), 0, NULL, NULL);
 	// storing the encrypted data
-	write_measurment.lock();
 	measurments["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = res;
-	write_measurment.unlock();
 
-	clReleaseMemObject(buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)]);
-	clReleaseMemObject(buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)]);
-
-	clFinish(cl_data.queue);
+	cl_data.queue.finish();
 }
 
 // encrypts an image, this will usally be a tile sized section of the original image to be encrypted
-void encrypt_image(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::vector<float>>& measurments, uint32_t TILE_SIZE, int index) {
+void encrypt_image(openCLContext cl_data, StatusCallback callback, cv::Mat& img, map<string, cl::Buffer>& buffers, map<string, std::vector<float>>& measurments, uint32_t TILE_SIZE, int index) {
 
-	// initializing opencl context
-	openCLContext cl_data{ NULL, NULL, NULL, NULL, NULL, NULL, 0 };
-	createOpenCLcontext(cl_data, "gfx1100");
+	map<string, cl::Kernel> kernels;
 
-	map<string, cl_kernel> kernels;
-
-	kernels["transpose"] = clCreateKernel(cl_data.program, "transpose", &cl_data.err);
-	kernels["mat_mat_mul_gpu_sp"] = clCreateKernel(cl_data.program, "mat_mat_mul_gpu_sp", &cl_data.err);
-	kernels["power_method"] = clCreateKernel(cl_data.program, "power_method", &cl_data.err);
-	kernels["mat_vec_mul_gpu_fp32"] = clCreateKernel(cl_data.program, "mat_vec_mul_gpu_fp32", &cl_data.err);
-	kernels["vec_scalar_gpu_sp"] = clCreateKernel(cl_data.program, "vec_scalar_gpu_sp", &cl_data.err);
-	kernels["vec_sub_gpu_sp"] = clCreateKernel(cl_data.program, "vec_sub_gpu_sp", &cl_data.err);
-	kernels["shrink_gpu_sp"] = clCreateKernel(cl_data.program, "shrink_gpu_sp", &cl_data.err);
-	kernels["ADM"] = clCreateKernel(cl_data.program, "ADM", &cl_data.err);
+	kernels["transpose"] = cl::Kernel(cl_data.program, "transpose");
+	kernels["mat_mat_mul_gpu_sp"] = cl::Kernel(cl_data.program, "mat_mat_mul_gpu_sp");
+	kernels["mat_vec_mul_gpu_fp32"] = cl::Kernel(cl_data.program, "mat_vec_mul_gpu_fp32");
+	kernels["vec_scalar_gpu_sp"] = cl::Kernel(cl_data.program, "vec_scalar_gpu_sp");
+	kernels["vec_sub_gpu_sp"] = cl::Kernel(cl_data.program, "vec_sub_gpu_sp");
+	kernels["shrink_gpu_sp"] = cl::Kernel(cl_data.program, "shrink_gpu_sp");
 
 	// extracting each color channel
 	cv::Mat channels[3];
@@ -594,22 +571,16 @@ void encrypt_image(cv::Mat& img, map<string, cl_mem>& buffers, map<string, std::
 		encrypt_data(channels[i], buffers, measurments, cl_data, kernels, TILE_SIZE, index, i);
 	}
 
-	clReleaseCommandQueue(cl_data.queue);
-	clReleaseCommandQueue(cl_data.device_queue);
-	clReleaseContext(cl_data.context);
-	clReleaseDevice(cl_data.device);
-	clReleaseProgram(cl_data.program);
-
-	for (auto i = kernels.begin(); i != kernels.end(); i++)
-		clReleaseKernel(i->second);
-
 	std::cout << "GPU encrypted tile " + std::to_string(index) + "\n";
+	string s = "GPU encrypted tile " + std::to_string(index);
+	std::thread t(send_messege, callback, s);
+	t.detach();
 }
 
 // the encryption matrix is a random matrix generated using the seeds from the passphrase
 // every seed is used to generate a portion of the matrix
 
-void generate_decryption_matrix(map<string, cl_mem>& buffers_gpu, map<string, vector<float>>& buffers_cpu, cl_context context, cl_command_queue queue, map<string, cl_kernel> kernels, uint32_t size, cl_device_id device, cl_program program, vector<unsigned int> seeds) {
+void generate_decryption_matrix(map<string, cl::Buffer>& buffers_gpu, map<string, vector<float>>& buffers_cpu, cl::Context context, cl::CommandQueue queue, map<string, cl::Kernel> kernels, uint32_t size, cl::Device device, cl::Program program, vector<unsigned int> seeds) {
 	cl_int err;
 
 	int width = size;
@@ -621,20 +592,22 @@ void generate_decryption_matrix(map<string, cl_mem>& buffers_gpu, map<string, ve
 
 	int chunk_size = (m * n) / seeds.size();
 
-	#pragma omp parallel for num_threads(8) schedule(dynamic)
+#pragma omp parallel for num_threads(8) schedule(dynamic)
 	for (int i = 0; i < seeds.size(); i++) {
 		vec_rand(Phi_alt, 1, seeds[i], chunk_size * i, chunk_size * i + chunk_size);
 	}
 
-	buffers_gpu["buffer_phi"] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * Phi_alt.size(), NULL, NULL);
-	err = clEnqueueWriteBuffer(queue, buffers_gpu["buffer_phi"], CL_TRUE, 0, sizeof(float) * Phi_alt.size(), Phi_alt.data(), 0, NULL, NULL);
+
+	buffers_gpu["buffer_phi"] = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(float) * Phi_alt.size(), NULL, NULL);
+
+	queue.enqueueWriteBuffer(buffers_gpu["buffer_phi"], CL_TRUE, 0, sizeof(float) * Phi_alt.size(), Phi_alt.data());
 
 	buffers_cpu["buffer_phi"] = Phi_alt;
 
-	clFinish(queue);
+	queue.finish();
 }
 
-void generate_decryption_matrix(map<string, cl_mem>& buffers_gpu, cl_context context, cl_command_queue queue, map<string, cl_kernel> kernels, uint32_t size, cl_device_id device, cl_program program, vector<unsigned int> seeds) {
+void generate_decryption_matrix(map<string, cl::Buffer>& buffers_gpu, cl::Context context, cl::CommandQueue queue, map<string, cl::Kernel> kernels, uint32_t size, cl::Device device, cl::Program program, vector<unsigned int> seeds) {
 	cl_int err;
 
 	int width = size;
@@ -646,15 +619,14 @@ void generate_decryption_matrix(map<string, cl_mem>& buffers_gpu, cl_context con
 
 	int chunk_size = (m * n) / seeds.size();
 
-	#pragma omp parallel for num_threads(8) schedule(dynamic)
+#pragma omp parallel for num_threads(8) schedule(dynamic)
 	for (int i = 0; i < seeds.size(); i++) {
 		vec_rand(Phi_alt, 1, seeds[i], chunk_size * i, chunk_size * i + chunk_size);
 	}
 
-	buffers_gpu["buffer_phi"] = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * Phi_alt.size(), NULL, NULL);
-	err = clEnqueueWriteBuffer(queue, buffers_gpu["buffer_phi"], CL_TRUE, 0, sizeof(float) * Phi_alt.size(), Phi_alt.data(), 0, NULL, NULL);
-
-	clFinish(queue);
+	buffers_gpu["buffer_phi"] = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(float) * Phi_alt.size(), NULL, NULL);
+	queue.enqueueWriteBuffer(buffers_gpu["buffer_phi"], CL_TRUE, 0, sizeof(float) * Phi_alt.size(), Phi_alt.data());
+	queue.finish();
 }
 
 void generate_decryption_matrix(map<string, vector<float>>& buffers_cpu, uint32_t size, vector<unsigned int> seeds) {
@@ -669,7 +641,7 @@ void generate_decryption_matrix(map<string, vector<float>>& buffers_cpu, uint32_
 
 	int chunk_size = (m * n) / seeds.size();
 
-	#pragma omp parallel for num_threads(8) schedule(dynamic)
+#pragma omp parallel for num_threads(8) schedule(dynamic)
 	for (int i = 0; i < seeds.size(); i++) {
 		vec_rand(Phi_alt, 1, seeds[i], chunk_size * i, chunk_size * i + chunk_size);
 	}
@@ -761,19 +733,15 @@ void encrypt_data(cv::Mat& img, map<string, vector<float>>& buffers, map<string,
 	float sum = 0.0f;
 
 	vector<float> b(m);
-	write_measurment.lock();
 	buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = b;
 	measurments["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = b;
-	write_measurment.unlock();
 	matrix_vector_mult_avx512(buffers["buffer_phi"], x_aux, buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)], n, m);
 
 	// storing the encrypted data
-	write_measurment.lock();
 	measurments["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)];
-	write_measurment.unlock();
 }
 
-void encrypt_image(cv::Mat& img, map<string, vector<float>>& buffers, map<string, std::vector<float>>& measurments, uint32_t TILE_SIZE, int index) {
+void encrypt_image(StatusCallback callback, cv::Mat& img, map<string, vector<float>>& buffers, map<string, std::vector<float>>& measurments, uint32_t TILE_SIZE, int index) {
 
 	// extracting each color channel
 	cv::Mat channels[3];
@@ -785,9 +753,12 @@ void encrypt_image(cv::Mat& img, map<string, vector<float>>& buffers, map<string
 	}
 
 	std::cout << "CPU encrypted tile " + std::to_string(index) + "\n";
+	string s = "CPU encrypted tile " + std::to_string(index);
+	std::thread t(send_messege, callback, s);
+	t.detach();
 }
 
-void decrypt_data(cv::Mat& out, map<string, vector<float>>& buffers, uint32_t tile_size, float max_eig, int index1, int index2, int iterations) {
+void decrypt_data(cv::Mat& out, map<string, vector<float>>& buffers, uint32_t tile_size, vector<float>& sol_alt, float max_eig, int index1, int index2, int iterations) {
 	cl_int err;
 
 	cv::Mat img = cv::Mat::zeros(cv::Size(tile_size, tile_size), CV_8U);
@@ -810,21 +781,19 @@ void decrypt_data(cv::Mat& out, map<string, vector<float>>& buffers, uint32_t ti
 	float beta = 0.000001f;
 	float tau = 0.000001f;
 
-	vector<float>sol_alt = ADM_gpu(buffers, n, m, max_eig, beta, tau, iterations, index1, index2);
-
 	s1 = sol_alt;
 	float o = s1[n - 1];
 	vec_fill(x1, 0.0f);
 	vec_fill(ek, 0.0f);
 	vec_fill(psi, 0.0f);
 
+	//static vector<vector<float>> eksd = fill_eks(n);
+	vector<vector<float>> eks = eksd;
+
 	for (int i = 0; i < n; i++)
 	{
-		vec_fill(ek, 0.0f);
-		ek[i] = 1.0f;
-		cv::idct(ek, psi, 0);
-		vec_scalar_avx(psi, s1[i], T);
-		vec_add_avx(x1, psi, T);
+		vec_scalar_avx(eks[i], s1[i], 1);
+		vec_add_avx(x1, eks[i], 1);
 	}
 
 	k = 0;
@@ -842,65 +811,122 @@ void decrypt_data(cv::Mat& out, map<string, vector<float>>& buffers, uint32_t ti
 	out = reconstructedImg;
 }
 
-
-void decrypt_image(cv::Mat& out, map<string, vector<float>>& buffers, uint32_t TILE_SIZE, float max_eig, int index, int iterations) {
-
+void decrypt_data_cpu(StatusCallback callback, cv::Mat& out, map<string, vector<float>>& buffers, int TILE_SIZE, vector<vector<float>> sol_alts, float max_eig, int index, int iterations) {
 	cv::Mat channels[3];
 	cv::split(out, channels);
 
 	for (int i = 0; i < 3; i++) {
-		decrypt_data(channels[i], buffers, TILE_SIZE, max_eig, index, i, iterations);
+		decrypt_data(channels[i], buffers, TILE_SIZE, sol_alts[i], max_eig, index, i, iterations);
 	}
 
 	cv::merge(channels, 3, out);
-
 	std::cout << "CPU decrypted tile " + std::to_string(index) + "\n";
-}
+	string s = "CPU decrypted tile " + std::to_string(index);
+	std::thread t(send_messege, callback, s);
+	t.detach();
 
+	// incrementing the number of tiles that have finished decrypting 
+	// when all tiles have been decrypted we notify the main thread since this thread has been detached from it;
+	mtx_processed_tiles.lock();
+	processed_tiles++;
+	mtx_processed_tiles.unlock();
 
-void CPUProcessingTaskEncryption(std::vector<int>& available_tiles, std::vector<cv::Mat>& array_of_images, map<string, vector<float>>& buffers, map<string, std::vector<float>>& measurments, uint32_t TILE_SIZE) {
-	mtx_tile.lock();
-	int index = retAvailableTile(available_tiles); // we get a tile that hasn't been processed yet
-	mtx_tile.unlock();
-	if (index > -1) {
-		encrypt_image(array_of_images[index], buffers, measurments, TILE_SIZE, index);
-		CPUProcessingTaskEncryption(available_tiles, array_of_images, buffers, measurments, TILE_SIZE);
+	if (num_tiles == processed_tiles) {
+		message_done = 1;
+		done_variable.notify_one();
 	}
 }
 
-void GPUProcessingTaskEncryption(std::vector<int>& available_tiles, std::vector<cv::Mat>& array_of_images, map<string, cl_mem>& buffers, map<string, std::vector<float>>& measurments, uint32_t TILE_SIZE) {
+void decrypt_image(StatusCallback callback, cv::Mat& out, map<string, vector<float>>& buffers, uint32_t TILE_SIZE, float max_eig, int index, int iterations) {
+	//std::cout << "decrypt_image CPU got core : " << GetCurrentProcessorNumber() << std::endl;
+
+	
+	int n = TILE_SIZE * TILE_SIZE;
+	vector<vector<float>> sol_alts(3, vector<float>(n));
+
+	float beta = 0.000001f;
+	float tau = 0.000001f;
+
+
+	// every color channel can be decrypted in parallel
+	vector<std::thread> CPUThreads(3);
+	
+	for (int i = 0; i < 3; i++) {
+		CPUThreads[i] = std::thread(ADM_cpu, std::ref(buffers), n, n, max_eig, beta, tau, iterations, index, i, std::ref(sol_alts[i]));
+	}
+
+	mtx_cores.lock();
+	static long core_channel_1 = get_free_core("core_channel_1");
+	static long core_channel_2 = get_free_core("core_channel_2");
+	static long core_channel_3 = get_free_core("core_channel_3");
+	mtx_cores.unlock();
+
+	SetThreadAffinityMask(CPUThreads[0].native_handle(), core_channel_1);
+	SetThreadAffinityMask(CPUThreads[1].native_handle(), core_channel_2);
+	SetThreadAffinityMask(CPUThreads[2].native_handle(), core_channel_3);
+
+	for (int i = 0; i < 3; i++) {
+		CPUThreads[i].join();
+	}
+
+	std::thread thread_decrypt_CPU(decrypt_data_cpu, callback, std::ref(out), std::ref(buffers), TILE_SIZE, sol_alts, max_eig, index, iterations);
+	mtx_cores.lock();
+	static long core_decrypt_data_cpu = get_free_core("decrypt_data_cpu");
+	SetThreadAffinityMask(thread_decrypt_CPU.native_handle(), core_decrypt_data_cpu);
+	mtx_cores.unlock();
+	thread_decrypt_CPU.detach();
+}
+
+
+void CPUProcessingTaskEncryption(StatusCallback callback, std::vector<int>& available_tiles, std::vector<cv::Mat>& array_of_images, map<string, vector<float>>& buffers, map<string, std::vector<float>>& measurments, uint32_t TILE_SIZE) {
 	mtx_tile.lock();
 	int index = retAvailableTile(available_tiles); // we get a tile that hasn't been processed yet
 	mtx_tile.unlock();
 	if (index > -1) {
-		encrypt_image(array_of_images[index], buffers, measurments, TILE_SIZE, index);
-		GPUProcessingTaskEncryption(available_tiles, array_of_images, buffers, measurments, TILE_SIZE);
+		encrypt_image(callback, array_of_images[index], buffers, measurments, TILE_SIZE, index);
+		CPUProcessingTaskEncryption(callback, available_tiles, array_of_images, buffers, measurments, TILE_SIZE);
 	}
 }
 
-void CPUProcessingTask(std::vector<int>& available_tiles, std::vector<cv::Mat>& array_of_images_out, map<string, vector<float>>& buffers, uint32_t TILE_SIZE, float max_eig, int iterations) {
+void GPUProcessingTaskEncryption(openCLContext cl_data, StatusCallback callback, std::vector<int>& available_tiles, std::vector<cv::Mat>& array_of_images, map<string, cl::Buffer>& buffers, map<string, std::vector<float>>& measurments, uint32_t TILE_SIZE) {
 	mtx_tile.lock();
 	int index = retAvailableTile(available_tiles); // we get a tile that hasn't been processed yet
 	mtx_tile.unlock();
 	if (index > -1) {
-		decrypt_image(array_of_images_out[index], buffers, TILE_SIZE, max_eig, index, iterations);
-		CPUProcessingTask(available_tiles, array_of_images_out, buffers, TILE_SIZE, max_eig, iterations);
+		encrypt_image(cl_data, callback, array_of_images[index], buffers, measurments, TILE_SIZE, index);
+		GPUProcessingTaskEncryption(cl_data, callback, available_tiles, array_of_images, buffers, measurments, TILE_SIZE);
 	}
 }
 
-void GPUProcessingTask(std::vector<int>& available_tiles, std::vector<cv::Mat>& array_of_images_out, map<string, cl_mem>& buffers, uint32_t TILE_SIZE, float max_eig, int iterations) {
+void CPUProcessingTask(StatusCallback callback, std::vector<int>& available_tiles, std::vector<cv::Mat>& array_of_images_out, map<string, vector<float>>& buffers, uint32_t TILE_SIZE, float max_eig, int iterations) {
+	
 	mtx_tile.lock();
 	int index = retAvailableTile(available_tiles); // we get a tile that hasn't been processed yet
 	mtx_tile.unlock();
+	//std::cout << "CPU got tile " << std::to_string(index) << std::endl;
 	if (index > -1) {
-		decrypt_image(array_of_images_out[index], buffers, TILE_SIZE, max_eig, index, iterations);
-		GPUProcessingTask(available_tiles, array_of_images_out, buffers, TILE_SIZE, max_eig, iterations);
+		decrypt_image(callback, array_of_images_out[index], buffers, TILE_SIZE, max_eig, index, iterations);
+		CPUProcessingTask(callback, available_tiles, array_of_images_out, buffers, TILE_SIZE, max_eig, iterations);
+	}
+	
+}
+
+void GPUProcessingTask(openCLContext cl_data, StatusCallback callback, std::vector<int>& available_tiles, std::vector<cv::Mat>& array_of_images_out, map<string, cl::Buffer>& buffers, uint32_t TILE_SIZE, float max_eig, int iterations) {
+
+	mtx_tile.lock();
+	int index = retAvailableTile(available_tiles); // we get a tile that hasn't been processed yet
+	mtx_tile.unlock();
+	//std::cout << "GPU got tile " << std::to_string(index) << std::endl;
+	if (index > -1) {
+		decrypt_image_gpu(cl_data, callback, array_of_images_out[index], buffers, TILE_SIZE, max_eig, index, iterations);
+		GPUProcessingTask(cl_data, callback, available_tiles, array_of_images_out, buffers, TILE_SIZE, max_eig, iterations);
 	}
 }
 
 // encrypts an image and returns an encryptionImage struct that contains the encrypted data
 
-encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
+encryptionImage encryptImage(StatusCallback callback,
+	cv::Mat img, /* image to be encrypted */
 	int TILE_SIZE, /* size of tiles in which the image is broken up and processed, larger tiles may provide better quality at the cost of memory and speed */
 	string passphrase, /* passphare used to generate the encryption matrix */
 	int acceleration,
@@ -945,25 +971,27 @@ encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
 	int N = processed_width / TILE_SIZE;
 	int M = processed_height / TILE_SIZE;
 
+	char message[50];
+	sprintf(message, "Number of tiles %d", (N * M));
+	callback(message);
+
 	// initializing opencl context
-	openCLContext cl_data{ NULL, NULL, NULL, NULL, NULL, NULL, 0 };
+	openCLContext cl_data;
 	createOpenCLcontext(cl_data, "gfx1100");
 
 	int k = 0;
 
-	map<string, cl_kernel> kernels;
-	map<string, cl_mem> buffers_gpu;
+	map<string, cl::Kernel> kernels;
+	map<string, cl::Buffer> buffers_gpu;
 	map<string, std::vector<float>> measurments;
 	map<string, vector<float>> buffers_cpu;
 
-	kernels["transpose"] = clCreateKernel(cl_data.program, "transpose", &cl_data.err);
-	kernels["mat_mat_mul_gpu_sp"] = clCreateKernel(cl_data.program, "mat_mat_mul_gpu_sp", &cl_data.err);
-	kernels["power_method"] = clCreateKernel(cl_data.program, "power_method", &cl_data.err);
-	kernels["mat_vec_mul_gpu_fp32"] = clCreateKernel(cl_data.program, "mat_vec_mul_gpu_fp32", &cl_data.err);
-	kernels["vec_scalar_gpu_sp"] = clCreateKernel(cl_data.program, "vec_scalar_gpu_sp", &cl_data.err);
-	kernels["vec_sub_gpu_sp"] = clCreateKernel(cl_data.program, "vec_sub_gpu_sp", &cl_data.err);
-	kernels["shrink_gpu_sp"] = clCreateKernel(cl_data.program, "shrink_gpu_sp", &cl_data.err);
-	kernels["ADM"] = clCreateKernel(cl_data.program, "ADM", &cl_data.err);
+	kernels["transpose"] = cl::Kernel(cl_data.program, "transpose");
+	kernels["mat_mat_mul_gpu_sp"] = cl::Kernel(cl_data.program, "mat_mat_mul_gpu_sp");
+	kernels["mat_vec_mul_gpu_fp32"] = cl::Kernel(cl_data.program, "mat_vec_mul_gpu_fp32");
+	kernels["vec_scalar_gpu_sp"] = cl::Kernel(cl_data.program, "vec_scalar_gpu_sp");
+	kernels["vec_sub_gpu_sp"] = cl::Kernel(cl_data.program, "vec_sub_gpu_sp");
+	kernels["shrink_gpu_sp"] = cl::Kernel(cl_data.program, "shrink_gpu_sp");
 
 	cv::Mat channels[3];
 	cv::Mat out_channels[3];
@@ -975,43 +1003,32 @@ encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
 
 	std::vector<cv::Mat> array_of_images = splitImage(img, N, M);
 	std::vector<int> array_of_processed_images(array_of_images.size(), 1);
-
 	std::vector<unsigned int> seeds = passord_to_seeds(passphrase);
 
-	// generating the encryption matrix
-	//generate_decryption_matrix(buffers, buffers_cpu, cl_data.context, cl_data.queue, kernels, TILE_SIZE, cl_data.device, cl_data.program, seeds);
-
-	vector<std::thread> GPUProcessing(threads);
+	vector<std::thread> GPUProcessing(1);
 	vector<std::thread> CPUProcessing(1);
 
 	// starting threads which process each tile based on the type of acceleration
 	switch (acceleration) {
 	case HYBRID_ACCELERATION:
 		generate_decryption_matrix(buffers_gpu, buffers_cpu, cl_data.context, cl_data.queue, kernels, TILE_SIZE, cl_data.device, cl_data.program, seeds);
-		
-		CPUProcessing[0] = std::thread(CPUProcessingTaskEncryption, std::ref(array_of_processed_images), std::ref(array_of_images), std::ref(buffers_cpu), std::ref(measurments), std::ref(TILE_SIZE));
-
-		for (int i = 0; i < threads; i++) {
-			GPUProcessing[i] = std::thread(GPUProcessingTaskEncryption, std::ref(array_of_processed_images), std::ref(array_of_images), std::ref(buffers_gpu), std::ref(measurments), std::ref(TILE_SIZE));
-		}
+		GPUProcessing[0] = std::thread(GPUProcessingTaskEncryption, std::ref(cl_data), std::ref(callback), std::ref(array_of_processed_images), std::ref(array_of_images), std::ref(buffers_gpu), std::ref(measurments), std::ref(TILE_SIZE));
+		CPUProcessing[0] = std::thread(CPUProcessingTaskEncryption, std::ref(callback), std::ref(array_of_processed_images), std::ref(array_of_images), std::ref(buffers_cpu), std::ref(measurments), std::ref(TILE_SIZE));
 		break;
+
 	case CPU_ACCELERATION:
 		generate_decryption_matrix(buffers_cpu, TILE_SIZE, seeds);
-		
-		CPUProcessing[0] = std::thread(CPUProcessingTaskEncryption, std::ref(array_of_processed_images), std::ref(array_of_images), std::ref(buffers_cpu), std::ref(measurments), std::ref(TILE_SIZE));
-
+		CPUProcessing[0] = std::thread(CPUProcessingTaskEncryption, std::ref(callback), std::ref(array_of_processed_images), std::ref(array_of_images), std::ref(buffers_cpu), std::ref(measurments), std::ref(TILE_SIZE));
 		break;
+
 	case GPU_ACCELERATION:
 		generate_decryption_matrix(buffers_gpu, cl_data.context, cl_data.queue, kernels, TILE_SIZE, cl_data.device, cl_data.program, seeds);
-		for (int i = 0; i < threads; i++) {
-			GPUProcessing[i] = std::thread(GPUProcessingTaskEncryption, std::ref(array_of_processed_images), std::ref(array_of_images), std::ref(buffers_gpu), std::ref(measurments), std::ref(TILE_SIZE));
-		}
+		GPUProcessing[0] = std::thread(GPUProcessingTaskEncryption, std::ref(cl_data), std::ref(callback), std::ref(array_of_processed_images), std::ref(array_of_images), std::ref(buffers_gpu), std::ref(measurments), std::ref(TILE_SIZE));
 		break;
+
 	default:
 		generate_decryption_matrix(buffers_cpu, TILE_SIZE, seeds);
-
-		CPUProcessing[0] = std::thread(CPUProcessingTaskEncryption, std::ref(array_of_processed_images), std::ref(array_of_images), std::ref(buffers_cpu), std::ref(measurments), std::ref(TILE_SIZE));
-
+		CPUProcessing[0] = std::thread(CPUProcessingTaskEncryption, std::ref(callback), std::ref(array_of_processed_images), std::ref(array_of_images), std::ref(buffers_cpu), std::ref(measurments), std::ref(TILE_SIZE));
 		break;
 	}
 
@@ -1019,18 +1036,17 @@ encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
 	switch (acceleration) {
 	case HYBRID_ACCELERATION:
 		CPUProcessing[0].join();
-		for (int i = 0; i < threads; i++) {
-			GPUProcessing[i].join();
-		}
+		GPUProcessing[0].join();
 		break;
+
 	case CPU_ACCELERATION:
 		CPUProcessing[0].join();
 		break;
+
 	case GPU_ACCELERATION:
-		for (int i = 0; i < threads; i++) {
-			GPUProcessing[i].join();
-		}
+		GPUProcessing[0].join();
 		break;
+
 	default:
 		CPUProcessing[0].join();
 		break;
@@ -1044,30 +1060,22 @@ encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
 		}
 	}
 
-	encryptionImage img_encrypted{ TILE_SIZE, original_width, original_height, processed_width, processed_height , data_array };
-
-	clReleaseMemObject(buffers_gpu["buffer_IDCT"]);
-	clReleaseMemObject(buffers_gpu["buffer_A_t"]);
-	clReleaseMemObject(buffers_gpu["buffer_A"]);
-	clReleaseMemObject(buffers_gpu["buffer_phi"]);
-
-	clReleaseCommandQueue(cl_data.queue);
-	clReleaseCommandQueue(cl_data.device_queue);
-	clReleaseContext(cl_data.context);
-	clReleaseDevice(cl_data.device);
-	clReleaseProgram(cl_data.program);
+	encryptionImage img_encrypted{ TILE_SIZE, N * M, original_width, original_height, processed_width, processed_height , data_array };
 
 	return img_encrypted;
 }
 
 //decrypts an image stored in a encryptionImage struct format and returns the decrypted image 
 
-cv::Mat decryptImage(encryptionImage img, /* struct containing encrypted image */
+void decryptImage(StatusCallback callback,
+	cv::Mat& out_img,
+	encryptionImage img, /* struct containing encrypted image */
 	string passphrase, /* passphare used to generate the encryption matrix, must be the same as the one used at encryption time */
 	int acceleration,
 	int threads, /* number of tiles to be encrypted simultaneously */
 	int iterations, /* the larger the tile the less need for more iterations */
-	bool removeNoise) { /* enables noise reduction */
+	bool removeNoise,
+	tile_range range) { /* enables noise reduction */
 
 	cv::Mat outputImg(cv::Size(img.original_width, img.original_height), CV_8UC3);
 
@@ -1094,25 +1102,33 @@ cv::Mat decryptImage(encryptionImage img, /* struct containing encrypted image *
 	int N = processed_width / img.TILE_SIZE;
 	int M = processed_height / img.TILE_SIZE;
 
+	num_tiles = (N * M);
+
+	char message[50];
+	sprintf(message, "Threads : %d", threads);
+	callback(message);
+	sprintf(message, "Number of tiles %d", (N * M));
+	callback(message);
+	sprintf(message, "Acceleration type : %d", acceleration);
+	callback(message);
+
 	// initializing opencl context
-	openCLContext cl_data{ NULL, NULL, NULL, NULL, NULL, NULL, 0 };
+	openCLContext cl_data;
 	createOpenCLcontext(cl_data, "gfx1100");
 
 	int k = 0;
 
-	map<string, cl_kernel> kernels;
-	map<string, cl_mem> buffers;
+	map<string, cl::Kernel> kernels;
+	map<string, cl::Buffer> buffers;
 	map<string, std::vector<float>> measurments;
 	map<string, vector<float>> buffers_cpu;
 
-	kernels["transpose"] = clCreateKernel(cl_data.program, "transpose", &cl_data.err);
-	kernels["mat_mat_mul_gpu_sp"] = clCreateKernel(cl_data.program, "mat_mat_mul_gpu_sp", &cl_data.err);
-	kernels["power_method"] = clCreateKernel(cl_data.program, "power_method", &cl_data.err);
-	kernels["mat_vec_mul_gpu_fp32"] = clCreateKernel(cl_data.program, "mat_vec_mul_gpu_fp32", &cl_data.err);
-	kernels["vec_scalar_gpu_sp"] = clCreateKernel(cl_data.program, "vec_scalar_gpu_sp", &cl_data.err);
-	kernels["vec_sub_gpu_sp"] = clCreateKernel(cl_data.program, "vec_sub_gpu_sp", &cl_data.err);
-	kernels["shrink_gpu_sp"] = clCreateKernel(cl_data.program, "shrink_gpu_sp", &cl_data.err);
-	kernels["ADM"] = clCreateKernel(cl_data.program, "ADM", &cl_data.err);
+	kernels["transpose"] = cl::Kernel(cl_data.program, "transpose");
+	kernels["mat_mat_mul_gpu_sp"] = cl::Kernel(cl_data.program, "mat_mat_mul_gpu_sp");
+	kernels["mat_vec_mul_gpu_fp32"] = cl::Kernel(cl_data.program, "mat_vec_mul_gpu_fp32");
+	kernels["vec_scalar_gpu_sp"] = cl::Kernel(cl_data.program, "vec_scalar_gpu_sp");
+	kernels["vec_sub_gpu_sp"] = cl::Kernel(cl_data.program, "vec_sub_gpu_sp");
+	kernels["shrink_gpu_sp"] = cl::Kernel(cl_data.program, "shrink_gpu_sp");
 
 	std::vector<unsigned int> seeds = passord_to_seeds(passphrase);
 
@@ -1127,8 +1143,8 @@ cv::Mat decryptImage(encryptionImage img, /* struct containing encrypted image *
 			vector<float>::const_iterator first = img.data_array.begin() + firstIndex;
 			vector<float>::const_iterator last = img.data_array.begin() + lastIndex;
 			vector<float> new_vec(first, last);
-			buffers["buffer_b" + std::to_string(i) + "_" + std::to_string(j)] = clCreateBuffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * img.TILE_SIZE * img.TILE_SIZE, NULL, NULL);
-			clEnqueueWriteBuffer(cl_data.queue, buffers["buffer_b" + std::to_string(i) + "_" + std::to_string(j)], CL_TRUE, 0, sizeof(float) * new_vec.size(), new_vec.data(), 0, NULL, NULL);
+			buffers["buffer_b" + std::to_string(i) + "_" + std::to_string(j)] = cl::Buffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * img.TILE_SIZE * img.TILE_SIZE);
+			cl_data.queue.enqueueWriteBuffer(buffers["buffer_b" + std::to_string(i) + "_" + std::to_string(j)], CL_TRUE, 0, sizeof(float) * new_vec.size(), new_vec.data());
 		}
 	}
 
@@ -1147,68 +1163,102 @@ cv::Mat decryptImage(encryptionImage img, /* struct containing encrypted image *
 	}
 
 	std::vector<cv::Mat> array_of_images_out = splitImage(outputImg, N, M);
-	std::vector<int> array_of_processed_images(array_of_images_out.size(), 1);
+	std::vector<int> array_of_processed_images(array_of_images_out.size(), 0);
 
-	vector<std::thread> GPUProcessing(threads);
+	for (int i = range.first; i <= range.last; i++) {
+		array_of_processed_images[i] = 1;
+	}
+
+	cv::Mat empty_mat(cv::Size(img.TILE_SIZE, img.TILE_SIZE), CV_8UC3);
+	empty_mat.setTo(cv::Scalar(0, 0, 0));
+
+	for (int i = 0; i < array_of_processed_images.size(); i++) {
+		if (array_of_processed_images[i] == 0) {
+			array_of_images_out[i] = empty_mat;
+		}
+	}
+
+	num_tiles = N * M;
+	eksd = fill_eks(img.TILE_SIZE * img.TILE_SIZE);
+	//eks_global.resize(img.TILE_SIZE * img.TILE_SIZE, vector<float>(img.TILE_SIZE * img.TILE_SIZE));
+	//fill_eks(eks_global, img.TILE_SIZE);
+	vector<std::thread> GPUProcessing(1);
 	vector<std::thread> CPUProcessing(1);
-
+	int kdghsu = 32;
 	// starting threads which process each tile based on the type of acceleration
 	switch (acceleration) {
 	case HYBRID_ACCELERATION:
 		generate_decryption_matrix(buffers, cl_data.context, cl_data.queue, kernels, img.TILE_SIZE, cl_data.device, cl_data.program, seeds);
 		generate_dictionary(buffers, buffers_cpu, cl_data.context, cl_data.queue, kernels, img.TILE_SIZE, cl_data.device, cl_data.program);
-
-		CPUProcessing[0] = std::thread(CPUProcessingTask, std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers_cpu), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
+		CPUProcessing[0] = std::thread(CPUProcessingTask, std::ref(callback), std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers_cpu), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
 		
-		for (int i = 0; i < threads; i++) {
-			GPUProcessing[i] = std::thread(GPUProcessingTask, std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
-		}
+		mtx_cores.lock();
+		static long core_cpu = get_free_core("core_cpu");
+		SetThreadAffinityMask(GetCurrentThread(), core_cpu);
+		mtx_cores.unlock();
+		
+		
+		GPUProcessing[0] = std::thread(GPUProcessingTask, std::ref(cl_data), std::ref(callback), std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
+		
+		mtx_cores.lock();
+		static long core_gpu = get_free_core("core_gpu");
+		SetThreadAffinityMask(GetCurrentThread(), core_gpu);
+		mtx_cores.unlock();
+
 		break;
+
 	case CPU_ACCELERATION:
 		generate_decryption_matrix(buffers, cl_data.context, cl_data.queue, kernels, img.TILE_SIZE, cl_data.device, cl_data.program, seeds);
 		generate_dictionary(buffers, buffers_cpu, cl_data.context, cl_data.queue, kernels, img.TILE_SIZE, cl_data.device, cl_data.program);
-
-		CPUProcessing[0] = std::thread(CPUProcessingTask, std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers_cpu), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
-
+		CPUProcessing[0] = std::thread(CPUProcessingTask, std::ref(callback), std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers_cpu), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
 		break;
+
 	case GPU_ACCELERATION:
 		generate_decryption_matrix(buffers, cl_data.context, cl_data.queue, kernels, img.TILE_SIZE, cl_data.device, cl_data.program, seeds);
 		generate_dictionary(buffers, cl_data.context, cl_data.queue, kernels, img.TILE_SIZE, cl_data.device, cl_data.program);
+		GPUProcessing[0] = std::thread(GPUProcessingTask, std::ref(cl_data), std::ref(callback), std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
 
-		for (int i = 0; i < threads; i++) {
-			GPUProcessing[i] = std::thread(GPUProcessingTask, std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
-		}
+		mtx_cores.lock();
+		static long core_gpu_only = get_free_core("core_gpu_only");
+		SetThreadAffinityMask(GPUProcessing[0].native_handle(), core_gpu_only);
+		mtx_cores.unlock();
+		//mtx_cores.lock();
+		//SetThreadAffinityMask(GPUProcessing[0].native_handle(), get_free_core(cores, true));
+		//mtx_cores.unlock();
 		break;
+
 	default:
 		generate_decryption_matrix(buffers, cl_data.context, cl_data.queue, kernels, img.TILE_SIZE, cl_data.device, cl_data.program, seeds);
 		generate_dictionary(buffers, buffers_cpu, cl_data.context, cl_data.queue, kernels, img.TILE_SIZE, cl_data.device, cl_data.program);
-
-		CPUProcessing[0] = std::thread(CPUProcessingTask, std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers_cpu), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
-
+		CPUProcessing[0] = std::thread(CPUProcessingTask, std::ref(callback), std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers_cpu), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
 		break;
 	}
 
 	// waiting for the threads to finish
 	switch (acceleration) {
 	case HYBRID_ACCELERATION:
-		for (int i = 0; i < threads; i++) {
-			GPUProcessing[i].join();
-		}
 		CPUProcessing[0].join();
+		GPUProcessing[0].join();
 		break;
+
 	case CPU_ACCELERATION:
 		CPUProcessing[0].join();
 		break;
+
 	case GPU_ACCELERATION:
-		for (int i = 0; i < threads; i++) {
-			GPUProcessing[i].join();
-		}
+		GPUProcessing[0].join();
 		break;
+
 	default:
 		CPUProcessing[0].join();
 		break;
 	}
-	//GPUProcessingTask(std::vector<int>&available_tiles, std::vector<cv::Mat>&array_of_images_out, map<string, cl_mem>&buffers, uint32_t TILE_SIZE, float max_eig)
+	for (int i = 0; i < array_of_images_out.size(); i++) {
+		//cv::imwrite("CPU decrypted tile " + std::to_string(i), array_of_images_out[i]);
+	}
+	
+	std::unique_lock<std::mutex> lock(mtx);
+	done_variable.wait(lock, [] { return message_done == 1; });
 
 	// stitching the tiles back together and resizing the image to the original size
 	bool OK1 = false;
@@ -1239,27 +1289,156 @@ cv::Mat decryptImage(encryptionImage img, /* struct containing encrypted image *
 
 	cv::resize(final_image2, final_image2, cv::Size(original_width, original_height));
 
-	clReleaseMemObject(buffers["buffer_IDCT"]);
-	clReleaseMemObject(buffers["buffer_A_t"]);
-	clReleaseMemObject(buffers["buffer_A"]);
-	clReleaseMemObject(buffers["buffer_phi"]);
-
-	for (int i = 0; i < N * M; i++) {
-		for (int j = 0; j < 3; j++) {
-			clReleaseMemObject(buffers["buffer_b" + std::to_string(i) + "_" + std::to_string(j)]);
-		}
-	}
-
-	clReleaseCommandQueue(cl_data.queue);
-	clReleaseCommandQueue(cl_data.device_queue);
-	clReleaseContext(cl_data.context);
-	clReleaseDevice(cl_data.device);
-	clReleaseProgram(cl_data.program);
-
 	// cleaning up noise
 	if (removeNoise) {
 		cv::fastNlMeansDenoising(final_image2, final_image2, 3);
 	}
+	out_img = final_image2;
 
-	return final_image2;
+	cv::imwrite("output.png", final_image2);
+}
+
+void decryptAndWriteFile(StatusCallback callback, const char* input, const char* output, const char* passphrase, int acceleration, int threads, int iterations, bool removeNoise) {
+
+	uint32_t TILE_SIZE = 64;
+
+	cv::Mat out;
+
+	int N = 1, M = threads;
+	encryptionImage img_encrypted;
+	readFromFile(input, img_encrypted);
+	cv::Mat outputImg(cv::Size(img_encrypted.original_width, img_encrypted.original_height), CV_8UC3);
+	std::vector<tile_range> ranges(threads);
+
+	int segment = img_encrypted.num_tiles / threads;
+
+	ranges[0].first = 0;
+	ranges[0].last = segment;
+
+	for (int i = 1; i < threads; i++) {
+		ranges[i].first = ranges[i - 1].last + 1;
+		ranges[i].last = ranges[i].first + segment;
+	}
+
+	ranges[ranges.size() - 1].last = img_encrypted.num_tiles - 1;
+
+	std::vector<cv::Mat> array_of_images_out = splitImage(outputImg, N, M);
+
+	for (int i = 0; i < threads; i++) {
+		array_of_images_out[i].setTo(cv::Scalar::all(0));
+	}
+
+	int numThreads = threads; // Number of cores
+	omp_set_num_threads(numThreads);
+
+	#pragma omp parallel for schedule(dynamic)
+	for (int i = 0; i < threads; i++) {
+		decryptImage(callback, array_of_images_out[i], img_encrypted, "5v48v5832v5924", acceleration, 1, 300, false, ranges[i]);
+	}
+
+	out = array_of_images_out[0];
+	for (int i = 1; i < threads; i++) {
+		cv::add(array_of_images_out[i], out, out);
+	}
+
+	cv::imwrite(output, out);
+
+	char message[50];
+	sprintf(message, "Finished decrypting");
+	callback(message);
+}
+
+const char* replaceSubstring(const char* input, const char* oldSubstring, const char* newSubstring) {
+	// Calculate lengths of the input and substrings
+	size_t inputLen = std::strlen(input);
+	size_t oldLen = std::strlen(oldSubstring);
+	size_t newLen = std::strlen(newSubstring);
+
+	// Estimate the maximum length of the result string
+	size_t maxLen = inputLen + (newLen - oldLen) * 10; // Adjust the multiplier as needed
+	char* result = new char[maxLen];
+	result[0] = '\0';
+
+	const char* pos = input;
+	while ((pos = std::strstr(pos, oldSubstring)) != nullptr) {
+		// Copy part before the old substring
+		strncat(result, input, pos - input);
+		// Append the new substring
+		strcat(result, newSubstring);
+		// Move past the old substring
+		pos += oldLen;
+		input = pos;
+	}
+	// Append the remaining part of the input string
+	strcat(result, input);
+
+	// Return the result as a const char*
+	return result;
+}
+
+void encryptAndWriteFile(StatusCallback callback, const char* input, const char* output, const char* passphrase, int TILE_SIZE, int acceleration, int threads, bool upscaling_enable) {
+	std::cout << input << std::endl;
+	std::cout << output << std::endl;
+	cv::Mat img = cv::imread(input, cv::IMREAD_COLOR);
+
+	encryptionImage img_encrypted = encryptImage(callback, img, TILE_SIZE, passphrase, acceleration, threads);
+	writeToFile(output, img_encrypted);
+
+	if (upscaling_enable) {
+		int original_width = img.size[1];
+		int original_height = img.size[0];
+
+		const char* oldSubstring = ".se";
+		const char* newSubstring = "DOWNSAMPLED.se";
+
+		const char* result = replaceSubstring(output, oldSubstring, newSubstring);
+
+		cv::resize(img, img, cv::Size(original_width / 2, original_height / 2));
+		encryptionImage img_encrypted_downsampled = encryptImage(callback, img, TILE_SIZE, passphrase, acceleration, threads);
+		writeToFile(result, img_encrypted_downsampled);
+	}
+
+	char message[50];
+	sprintf(message, "Finished encrypting");
+	callback(message);
+}
+
+void deleteOriginalImage(StatusCallback callback, const char* input, bool scramble) {
+	cv::Mat img = cv::imread(input, cv::IMREAD_COLOR);
+
+	if (img.empty()) {
+		std::cerr << "Could not open or find the image!" << std::endl;
+	}
+
+	if (scramble) {
+		int rows = img.rows;
+		int cols = img.cols;
+		std::random_device e;
+		std::default_random_engine generator(e());
+		generator.seed(1);
+		static std::uniform_int_distribution<> dis(0, 255);
+
+		for (int row = 0; row < rows; ++row) {
+			for (int col = 0; col < cols; ++col) {
+				img.at<cv::Vec3b>(row, col)[0] = dis(generator);
+				img.at<cv::Vec3b>(row, col)[1] = dis(generator);
+				img.at<cv::Vec3b>(row, col)[2] = dis(generator);
+			}
+		}
+	}
+
+	cv::imwrite(input, img);
+
+	if (std::remove(input) == 0) {
+		std::cout << "File deleted successfully.\n";
+	}
+	else {
+		std::cerr << "Error deleting file.\n";
+	}
+
+	if (scramble) {
+		char message[50];
+		sprintf(message, "Scrambled");
+		callback(message);
+	}
 }
