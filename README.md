@@ -71,5 +71,4 @@ Performance :
 TODO:
 - [x] Add CPU fallback
 - [x] hybrid CPU & GPU acceleration 
-- [ ] FP16 for potentially faster execution on GPU
 - [x] General optimizations
