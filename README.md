@@ -66,7 +66,7 @@ If the passphrase used to decrypt it is "5v38v5832v5924", the image will look li
 
 Performance : 
 
-~5-6 minutes to decrypt a 1024x576 image on a 7900 XT and Ryzen 7900.
+~5-6 minutes to decrypt a 2K x 2K image on a 7900 XT and Ryzen 7900.
 
 TODO:
 - [x] Add CPU fallback
