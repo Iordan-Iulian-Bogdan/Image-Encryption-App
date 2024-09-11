@@ -69,7 +69,7 @@ Performance :
 ~5-6 minutes to decrypt a 1024x576 image on a 7900 XT and Ryzen 7900.
 
 TODO:
-- [ ] Add CPU fallback
-- [ ] hybrid CPU & GPU acceleration 
+- [x] Add CPU fallback
+- [x] hybrid CPU & GPU acceleration 
 - [ ] FP16 for potentially faster execution on GPU
-- [ ] General optimizations
+- [x] General optimizations
