@@ -1294,8 +1294,6 @@ void decryptImage(StatusCallback callback,
 		cv::fastNlMeansDenoising(final_image2, final_image2, 3);
 	}
 	out_img = final_image2;
-
-	cv::imwrite("output.png", final_image2);
 }
 
 void decryptAndWriteFile(StatusCallback callback, const char* input, const char* output, const char* passphrase, int acceleration, int threads, int iterations, bool removeNoise) {
