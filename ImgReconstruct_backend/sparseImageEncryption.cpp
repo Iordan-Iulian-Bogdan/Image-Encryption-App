@@ -7,26 +7,20 @@
 #include <chrono>
 
 std::mutex mtx_tile;
-
 std::mutex mtx_print;
-
 std::mutex mtx_cores;
+std::mutex mtx_done;
+std::mutex mtx_processed_tiles;
 
-int message_done = 0;
-std::mutex mtx;
 std::condition_variable done_variable;
 
-int count_g = 0;
-
-vector<vector<float>> eks_global;
-
 std::vector<string> cores(std::thread::hardware_concurrency(), "Empty");
+static vector<vector<float>> eksd;
+
+bool message_done = false;
 
 int num_tiles = 0;
 int processed_tiles = 0;
-std::mutex mtx_processed_tiles;
-
-static vector<vector<float>> eksd;
 
 // returns the index of a core where nothing has been scheduled on it yet
 unsigned long get_free_core(string source) {
@@ -95,7 +89,6 @@ void send_messege(StatusCallback callback, string s) {
 	sprintf(message, s.c_str());
 	callback(message);
 }
-
 
 void generateIDCT(vector<float>& IDCT, int n)
 {
@@ -359,7 +352,7 @@ void decrypt_data_gpu(StatusCallback callback, cv::Mat out, map<string, cl::Buff
 	mtx_processed_tiles.unlock();
 
 	if (num_tiles == processed_tiles) {
-		message_done = 1;
+		message_done = true;
 		done_variable.notify_one();
 	}
 }
@@ -592,7 +585,8 @@ void generate_decryption_matrix(map<string, cl::Buffer>& buffers_gpu, map<string
 
 	int chunk_size = (m * n) / seeds.size();
 
-#pragma omp parallel for num_threads(8) schedule(dynamic)
+	int numThreads = omp_get_max_threads();
+	#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
 	for (int i = 0; i < seeds.size(); i++) {
 		vec_rand(Phi_alt, 1, seeds[i], chunk_size * i, chunk_size * i + chunk_size);
 	}
@@ -619,7 +613,8 @@ void generate_decryption_matrix(map<string, cl::Buffer>& buffers_gpu, cl::Contex
 
 	int chunk_size = (m * n) / seeds.size();
 
-#pragma omp parallel for num_threads(8) schedule(dynamic)
+	int numThreads = omp_get_max_threads();
+	#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
 	for (int i = 0; i < seeds.size(); i++) {
 		vec_rand(Phi_alt, 1, seeds[i], chunk_size * i, chunk_size * i + chunk_size);
 	}
@@ -641,7 +636,8 @@ void generate_decryption_matrix(map<string, vector<float>>& buffers_cpu, uint32_
 
 	int chunk_size = (m * n) / seeds.size();
 
-#pragma omp parallel for num_threads(8) schedule(dynamic)
+	int numThreads = omp_get_max_threads();
+	#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
 	for (int i = 0; i < seeds.size(); i++) {
 		vec_rand(Phi_alt, 1, seeds[i], chunk_size * i, chunk_size * i + chunk_size);
 	}
@@ -832,7 +828,7 @@ void decrypt_data_cpu(StatusCallback callback, cv::Mat& out, map<string, vector<
 	mtx_processed_tiles.unlock();
 
 	if (num_tiles == processed_tiles) {
-		message_done = 1;
+		message_done = true;
 		done_variable.notify_one();
 	}
 }
@@ -929,8 +925,7 @@ encryptionImage encryptImage(StatusCallback callback,
 	cv::Mat img, /* image to be encrypted */
 	int TILE_SIZE, /* size of tiles in which the image is broken up and processed, larger tiles may provide better quality at the cost of memory and speed */
 	string passphrase, /* passphare used to generate the encryption matrix */
-	int acceleration,
-	int threads /* number of tiles to be encrypted simultaneously */) {
+	int acceleration) {
 
 	if (img.empty()) {
 		throw std::runtime_error("Image empty");
@@ -1072,10 +1067,8 @@ void decryptImage(StatusCallback callback,
 	encryptionImage img, /* struct containing encrypted image */
 	string passphrase, /* passphare used to generate the encryption matrix, must be the same as the one used at encryption time */
 	int acceleration,
-	int threads, /* number of tiles to be encrypted simultaneously */
 	int iterations, /* the larger the tile the less need for more iterations */
-	bool removeNoise,
-	tile_range range) { /* enables noise reduction */
+	bool removeNoise) { /* enables noise reduction */
 
 	cv::Mat outputImg(cv::Size(img.original_width, img.original_height), CV_8UC3);
 
@@ -1105,8 +1098,6 @@ void decryptImage(StatusCallback callback,
 	num_tiles = (N * M);
 
 	char message[50];
-	sprintf(message, "Threads : %d", threads);
-	callback(message);
 	sprintf(message, "Number of tiles %d", (N * M));
 	callback(message);
 	sprintf(message, "Acceleration type : %d", acceleration);
@@ -1163,11 +1154,7 @@ void decryptImage(StatusCallback callback,
 	}
 
 	std::vector<cv::Mat> array_of_images_out = splitImage(outputImg, N, M);
-	std::vector<int> array_of_processed_images(array_of_images_out.size(), 0);
-
-	for (int i = range.first; i <= range.last; i++) {
-		array_of_processed_images[i] = 1;
-	}
+	std::vector<int> array_of_processed_images(array_of_images_out.size(), 1);
 
 	cv::Mat empty_mat(cv::Size(img.TILE_SIZE, img.TILE_SIZE), CV_8UC3);
 	empty_mat.setTo(cv::Scalar(0, 0, 0));
@@ -1257,8 +1244,8 @@ void decryptImage(StatusCallback callback,
 		//cv::imwrite("CPU decrypted tile " + std::to_string(i), array_of_images_out[i]);
 	}
 	
-	std::unique_lock<std::mutex> lock(mtx);
-	done_variable.wait(lock, [] { return message_done == 1; });
+	std::unique_lock<std::mutex> lock(mtx_done);
+	done_variable.wait(lock, [] { return message_done == true; });
 
 	// stitching the tiles back together and resizing the image to the original size
 	bool OK1 = false;
@@ -1293,93 +1280,35 @@ void decryptImage(StatusCallback callback,
 	if (removeNoise) {
 		cv::fastNlMeansDenoising(final_image2, final_image2, 3);
 	}
+
 	out_img = final_image2;
 }
 
-void decryptAndWriteFile(StatusCallback callback, const char* input, const char* output, const char* passphrase, int acceleration, int threads, int iterations, bool removeNoise) {
+void decryptAndWriteFile(StatusCallback callback, const char* input, const char* output, const char* passphrase, int acceleration, int iterations, bool removeNoise) {
 
 	uint32_t TILE_SIZE = 64;
 
-	cv::Mat out;
-
-	int N = 1, M = threads;
 	encryptionImage img_encrypted;
 	readFromFile(input, img_encrypted);
+
 	cv::Mat outputImg(cv::Size(img_encrypted.original_width, img_encrypted.original_height), CV_8UC3);
-	std::vector<tile_range> ranges(threads);
 
-	int segment = img_encrypted.num_tiles / threads;
+	omp_set_num_threads(1);
+	decryptImage(callback, outputImg, img_encrypted, "5v48v5832v5924", acceleration, 300, false);
 
-	ranges[0].first = 0;
-	ranges[0].last = segment;
-
-	for (int i = 1; i < threads; i++) {
-		ranges[i].first = ranges[i - 1].last + 1;
-		ranges[i].last = ranges[i].first + segment;
-	}
-
-	ranges[ranges.size() - 1].last = img_encrypted.num_tiles - 1;
-
-	std::vector<cv::Mat> array_of_images_out = splitImage(outputImg, N, M);
-
-	for (int i = 0; i < threads; i++) {
-		array_of_images_out[i].setTo(cv::Scalar::all(0));
-	}
-
-	int numThreads = threads; // Number of cores
-	omp_set_num_threads(numThreads);
-
-	#pragma omp parallel for schedule(dynamic)
-	for (int i = 0; i < threads; i++) {
-		decryptImage(callback, array_of_images_out[i], img_encrypted, "5v48v5832v5924", acceleration, 1, 300, false, ranges[i]);
-	}
-
-	out = array_of_images_out[0];
-	for (int i = 1; i < threads; i++) {
-		cv::add(array_of_images_out[i], out, out);
-	}
-
-	cv::imwrite(output, out);
+	cv::imwrite(output, outputImg);
 
 	char message[50];
 	sprintf(message, "Finished decrypting");
 	callback(message);
 }
 
-const char* replaceSubstring(const char* input, const char* oldSubstring, const char* newSubstring) {
-	// Calculate lengths of the input and substrings
-	size_t inputLen = std::strlen(input);
-	size_t oldLen = std::strlen(oldSubstring);
-	size_t newLen = std::strlen(newSubstring);
-
-	// Estimate the maximum length of the result string
-	size_t maxLen = inputLen + (newLen - oldLen) * 10; // Adjust the multiplier as needed
-	char* result = new char[maxLen];
-	result[0] = '\0';
-
-	const char* pos = input;
-	while ((pos = std::strstr(pos, oldSubstring)) != nullptr) {
-		// Copy part before the old substring
-		strncat(result, input, pos - input);
-		// Append the new substring
-		strcat(result, newSubstring);
-		// Move past the old substring
-		pos += oldLen;
-		input = pos;
-	}
-	// Append the remaining part of the input string
-	strcat(result, input);
-
-	// Return the result as a const char*
-	return result;
-}
-
-void encryptAndWriteFile(StatusCallback callback, const char* input, const char* output, const char* passphrase, int TILE_SIZE, int acceleration, int threads, bool upscaling_enable) {
+void encryptAndWriteFile(StatusCallback callback, const char* input, const char* output, const char* passphrase, int TILE_SIZE, int acceleration, bool upscaling_enable) {
 	std::cout << input << std::endl;
 	std::cout << output << std::endl;
 	cv::Mat img = cv::imread(input, cv::IMREAD_COLOR);
 
-	encryptionImage img_encrypted = encryptImage(callback, img, TILE_SIZE, passphrase, acceleration, threads);
+	encryptionImage img_encrypted = encryptImage(callback, img, TILE_SIZE, passphrase, acceleration);
 	writeToFile(output, img_encrypted);
 
 	if (upscaling_enable) {
@@ -1392,7 +1321,7 @@ void encryptAndWriteFile(StatusCallback callback, const char* input, const char*
 		const char* result = replaceSubstring(output, oldSubstring, newSubstring);
 
 		cv::resize(img, img, cv::Size(original_width / 2, original_height / 2));
-		encryptionImage img_encrypted_downsampled = encryptImage(callback, img, TILE_SIZE, passphrase, acceleration, threads);
+		encryptionImage img_encrypted_downsampled = encryptImage(callback, img, TILE_SIZE, passphrase, acceleration);
 		writeToFile(result, img_encrypted_downsampled);
 	}
 

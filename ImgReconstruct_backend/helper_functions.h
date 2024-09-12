@@ -4,8 +4,15 @@
 #include <tuple>
 #include <iostream>
 #include <fstream>
+#include <string>
 #include <map>
 #include <string>
+#include <map>
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/photo.hpp>
 
 //	struct used to store the encrypted data and how it was formated
 struct encryptionImage {
@@ -27,6 +34,8 @@ struct openCLContext {
 	cl_int err;
 };
 
+typedef void (*StatusCallback)(const char*);
+
 void matrix_vector_mult_avx512(const std::vector<float>& matrix, const std::vector<float>& vector, std::vector<float>& result, size_t rows, size_t cols);
 void matrix_mult_avx512(const std::vector<float>& matrixA, const std::vector<float>& matrixB, std::vector<float>& result, size_t rowsA, size_t colsA, size_t colsB);
 float eigen_aprox_polynomial(uint32_t x);
@@ -34,6 +43,8 @@ int retAvailableTile(std::vector<int>& array_of_images);
 void runVectorAddKernel(cl_context context, cl_command_queue queue, cl_kernel kernel, cl_mem bufferA, cl_mem bufferB, cl_mem bufferC, int length);
 void writeToFile(const std::string& filename, const encryptionImage& img);
 void readFromFile(const std::string& filename, encryptionImage& img);
+unsigned long get_free_core(std::string source);
+const char* replaceSubstring(const char* input, const char* oldSubstring, const char* newSubstring);
 
 inline int mat_vec_mul_GPU(cl::Buffer& buffer_mat, cl::Buffer& buffer_vec, cl::Buffer& buffer_res, int n, int m, openCLContext cl_data, std::map<std::string, cl::Kernel> kernels) {
 	kernels["mat_vec_mul_gpu_fp32"].setArg(0, buffer_mat);

@@ -22,10 +22,10 @@
 
 typedef void (*StatusCallback)(const char*);
 
-encryptionImage encryptImage(StatusCallback callback, cv::Mat img, int TILE_SIZE, std::string passphrase, int acceleration, int threads = 1);
-void decryptImage(StatusCallback callback, cv::Mat& img_out, encryptionImage img, std::string passphrase, int acceleration, int threads = 1, int iterations = 300, bool removeNoise = false, tile_range range = { 0, 0 });
+encryptionImage encryptImage(StatusCallback callback, cv::Mat img, int TILE_SIZE, std::string passphrase, int acceleration);
+void decryptImage(StatusCallback callback, cv::Mat& img_out, encryptionImage img, std::string passphrase, int acceleration, int iterations = 300, bool removeNoise = false);
 
 
-void encryptAndWriteFile(StatusCallback callback, const char* input, const char* output, const char* passphrase, int TILE_SIZE, int acceleration, int threads, bool upscaling_enable);
-void decryptAndWriteFile(StatusCallback callback, const char* input, const char* output, const char* passphrase, int acceleration, int threads, int iterations, bool removeNoise);
+void encryptAndWriteFile(StatusCallback callback, const char* input, const char* output, const char* passphrase, int TILE_SIZE, int acceleration, bool upscaling_enable);
+void decryptAndWriteFile(StatusCallback callback, const char* input, const char* output, const char* passphrase, int acceleration, int iterations, bool removeNoise);
 void deleteOriginalImage(StatusCallback callback, const char* input, bool scramble);

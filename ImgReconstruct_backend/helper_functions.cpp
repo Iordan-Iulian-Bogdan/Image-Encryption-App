@@ -1,5 +1,4 @@
 #include "helper_functions.h"
-#include <omp.h>
 #include <immintrin.h>
 #include <tuple>
 #include <fstream>
@@ -7,10 +6,10 @@
 
 void matrix_vector_mult_avx512(const std::vector<float>& matrix, const std::vector<float>& vector, std::vector<float>& result, size_t rows, size_t cols) {
 
-    int numThreads = 12; // Number of cores
-    omp_set_num_threads(numThreads);
+    //int numThreads = 12; // Number of cores
+    //omp_set_num_threads(numThreads);
 
-    #pragma omp parallel for
+    //#pragma omp parallel for
     for (int64_t i = 0; i < rows; ++i) {
         __m512 vec_result = _mm512_setzero_ps();
         for (size_t j = 0; j < cols; j += 16) {
@@ -32,8 +31,8 @@ void matrix_vector_mult_avx512(const std::vector<float>& matrix, const std::vect
 
 void matrix_mult_avx512(const std::vector<float>& matrixA, const std::vector<float>& matrixB, std::vector<float>& result, size_t rowsA, size_t colsA, size_t colsB) {
 
-    int numThreads = omp_get_max_threads();
-#pragma omp parallel for num_threads(numThreads / 2) schedule(dynamic)
+    //int numThreads = omp_get_max_threads();
+//#pragma omp parallel for num_threads(numThreads / 2) schedule(dynamic)
     for (int64_t i = 0; i < rowsA; ++i) {
         for (size_t j = 0; j < colsB; ++j) {
             __m512 vec_result = _mm512_setzero_ps();
@@ -211,4 +210,32 @@ void readFromFile(const std::string& filename, encryptionImage& img) {
     inFile.read(reinterpret_cast<char*>(img.data_array.data()), dataSize * sizeof(float));
 
     inFile.close();
+}
+
+const char* replaceSubstring(const char* input, const char* oldSubstring, const char* newSubstring) {
+    // Calculate lengths of the input and substrings
+    size_t inputLen = std::strlen(input);
+    size_t oldLen = std::strlen(oldSubstring);
+    size_t newLen = std::strlen(newSubstring);
+
+    // Estimate the maximum length of the result string
+    size_t maxLen = inputLen + (newLen - oldLen) * 10; // Adjust the multiplier as needed
+    char* result = new char[maxLen];
+    result[0] = '\0';
+
+    const char* pos = input;
+    while ((pos = std::strstr(pos, oldSubstring)) != nullptr) {
+        // Copy part before the old substring
+        strncat(result, input, pos - input);
+        // Append the new substring
+        strcat(result, newSubstring);
+        // Move past the old substring
+        pos += oldLen;
+        input = pos;
+    }
+    // Append the remaining part of the input string
+    strcat(result, input);
+
+    // Return the result as a const char*
+    return result;
 }
