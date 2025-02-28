@@ -30,45 +30,11 @@ Outputs : 𝑥′ vectorized decrypted image
 
 This works only if the  measurement matrix ```𝜓``` is identical upon encryption and decryption. ```𝜓``` is meant to be a random matrix but by using a deterministic number generator which is seeded using a passphrase we can encrypt and decrypt an arbitrary signal. Keep in mind that this method is not lossless, the reconstructed signal will not be 100% identical, this is why you'd only want to use something like this for things like images. ```𝑦``` represents the encrypted image, since it's obtained by multiplying the original image with a random matrix it will contain a bunch of seemeingly random numbers.
 
-Because ```𝑥``` is a vectorized image which means it can have millions of elements the dictionary ```𝐴``` is going to be a matrix with potentially billions of elements (so dozens of GB in size). The challenge in doing something like this comes from the fact that the matrices involved occupy so much memory that it's impossible to solve this problem on a regular computer as is, however, we can divide the original image in smaller chunks that can fit in the memory of a typical computer.
+Because ```𝑥``` is a vectorized image which means it can have millions of elements the dictionary ```𝐴``` is going to be a matrix with potentially billions of elements (so dozens of GB in size). The challenge in doing something like this comes from the fact that the matrices involved occupy so much memory that it's impossible to solve this problem on a regular computer as is, however, we can divide the original image in smaller chunks that can fit in the memory of a typical computer. 
 
-Another issue is speed, compressive sensing is extremely costly computationally as well, which is why this encryption method is GPU accelerated using OpenCL.
-
-How to use :
-
-```encryptionImage img_encrypted = encryptImage(img, TILE_SIZE, "5v48v5832v5924", 4);```
-
-This encrypts the image and stores it into a struct which contains the encrypted data and some other info needed to properly decrypt the image after. 
-
-```
-encryptionImage encryptImage(cv::Mat img, /* image to be encrypted */
-				string passphrase, /* passphare used to generate the encryption matrix, must be the same as the one used at encryption time */
-				int acceleration,
-				int threads, /* number of tiles to be encrypted simultaneously */
-				int iterations, /* the larger the tile the less need for more iterations */
-				bool removeNoise) { /* enables noise reduction */
-```
-
-The longer the passphrase the more seeds are used to generate the encryption matrix ```A``` and thus the encryption is more secure. 
-
-```TILE_SIZE``` this is the size of the chunks that are going to processed at a time, larger tile sizes will use more memory but might produce better results. A GPU with more than 8GB of VRAM is needed for a tile size of 128 for example.
-
-```threads``` is the ammount of instances of chunks of the image that are encrypted in parallel, might provide a speed up, sepcially if the TILE_SIZE is smaller.
-```acceleration``` represents the type of acceleration, HYBRID_ACCELERATION, GPU_ACCELERATION, CPU_ONLY_ACCELERATION
-
-If the passphrase is incorrect the image will basically look like noise, say you encrypt the following image with the passphrase as "5v48v5832v5924" :
-
-![good](https://github.com/Iordan-Iulian-Bogdan/Image-Encryption-App/assets/56405877/95477a8c-4e1c-44e7-b4aa-dc5c2ee7c21b)
-
-If the passphrase used to decrypt it is "5v38v5832v5924", the image will look like this :
-
-![bad](https://github.com/Iordan-Iulian-Bogdan/Image-Encryption-App/assets/56405877/30d58d75-330c-4df6-8dec-c28d3eae05ea)
+GPU acceleration no longer needed since switching to Limited-memory BFGS using [this](https://github.com/chokkan/liblbfgs) library. This brought unpon a huge speed increase and lower memory consumption. 
 
 Performance : 
 
-~5-6 minutes to decrypt a 2K x 2K image on a 7900 XT and Ryzen 7900.
+~10 seconds to decrypt a 4032 X 3024 image on a Ryzen 7900.
 
-TODO:
-- [x] Add CPU fallback
-- [x] hybrid CPU & GPU acceleration 
-- [x] General optimizations
