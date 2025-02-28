@@ -40,5 +40,5 @@ Performance :
 
 TODO List : 
 
-- [ ] Improve quality of decrypted image, right now there are fair amount of artifacts upon closer insepction.
+- [ ] Improve quality of decrypted image, right now there are fair amount of artifacts upon closer inspection.
 
