@@ -22,7 +22,7 @@ void matrix_vector_mult_avx512(const std::vector<float>& matrix, const std::vect
 
             // Add the result to the accumulator
             vec_result = _mm512_add_ps(vec_result, mul);
-        }
+        } 
 
         // Horizontally add all elements of vec_result and store it in result[i]
         result[i] = _mm512_reduce_add_ps(vec_result);
@@ -31,8 +31,8 @@ void matrix_vector_mult_avx512(const std::vector<float>& matrix, const std::vect
 
 void matrix_mult_avx512(const std::vector<float>& matrixA, const std::vector<float>& matrixB, std::vector<float>& result, size_t rowsA, size_t colsA, size_t colsB) {
 
-    //int numThreads = omp_get_max_threads();
-//#pragma omp parallel for num_threads(numThreads / 2) schedule(dynamic)
+    //int numThreads = 24;
+//#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
     for (int64_t i = 0; i < rowsA; ++i) {
         for (size_t j = 0; j < colsB; ++j) {
             __m512 vec_result = _mm512_setzero_ps();

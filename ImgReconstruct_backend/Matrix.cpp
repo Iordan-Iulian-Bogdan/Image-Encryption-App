@@ -153,7 +153,7 @@ template <class T>
 // Overloaded multiplication operator (scalar multiplication)
 Matrix<T> Matrix<T>::operator*(T scalar) const {
     Matrix result(rows, cols);
-    int numThreads = omp_get_max_threads();
+    int numThreads = 24;
     #pragma omp parallel for num_threads(numThreads) schedule(dynamic)
     for (int64_t i = 0; i < rows; ++i) {
         for (int64_t j = 0; j < cols; ++j) {
@@ -172,7 +172,7 @@ Matrix<T> Matrix<T>::getTransposedMatrix() {
 
     // Create a temporary vector to store the transposed matrix
     std::vector<T> transposedMatrix(data.size());
-    int numThreads = omp_get_max_threads();
+    int numThreads = 24;
     #pragma omp parallel for num_threads(numThreads) schedule(dynamic)
     for (int64_t i = 0; i < rows; ++i) {
         for (int64_t j = 0; j < cols; ++j) {
@@ -196,7 +196,7 @@ void Matrix<T>::transposeMatrix() {
     std::vector<T> transposedMatrix(data.size());
 
     // Transpose the matrix
-    int numThreads = omp_get_max_threads();
+    int numThreads = 24;
     #pragma omp parallel for num_threads(numThreads) schedule(dynamic)
     for (int64_t i = 0; i < rows; ++i) {
         for (int64_t j = 0; j < cols; ++j) {
@@ -285,7 +285,7 @@ void Matrix<T>::fillRandom(std::vector<T>& data, T lower_bound, T upper_bound) {
     std::mt19937 gen(rd());
     std::uniform_real_distribution<T> distribution(lower_bound, upper_bound);
 
-    int numThreads = omp_get_max_threads();
+    int numThreads = 24;
     #pragma omp parallel for num_threads(numThreads) schedule(dynamic)
     for (int64_t i = 0; i < data.size(); ++i) {
         data[i] = distribution(gen);
@@ -298,7 +298,7 @@ void Matrix<T>::fillRandomSparse(std::vector<T>& data, uint64_t sparsity, T lowe
     std::uniform_real_distribution<T> distribution(lower_bound, upper_bound);
     static std::uniform_int_distribution<> distribution_sparse(0, data.size() - 1);
 
-    int numThreads = omp_get_max_threads();
+    int numThreads = 24;
     #pragma omp parallel for num_threads(numThreads) schedule(dynamic)
     for (int64_t i = 0; i < sparsity; ++i) {
         data[distribution_sparse(e)] = distribution(e);
@@ -311,7 +311,7 @@ void Matrix<T>::fillRandomSparseBinary(std::vector<T>& data, uint64_t sparsity, 
     std::uniform_real_distribution<T> distribution(lower_bound, upper_bound);
     static std::uniform_int_distribution<> distribution_sparse(0, data.size() - 1);
 
-    int numThreads = omp_get_max_threads();
+    int numThreads = 24;
 #pragma omp parallel for num_threads(numThreads) schedule(dynamic)
     for (int64_t i = 0; i < sparsity; ++i) {
         data[distribution_sparse(e)] = 1;

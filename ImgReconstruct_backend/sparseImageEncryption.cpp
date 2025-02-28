@@ -1,6 +1,5 @@
 #include "sparseImageEncryption.h"
 #include "AVX_functions.h"
-#include <cblas.h>
 #include <future>
 #include <queue>
 #include <bitset>
@@ -11,6 +10,7 @@ std::mutex mtx_print;
 std::mutex mtx_cores;
 std::mutex mtx_done;
 std::mutex mtx_processed_tiles;
+std::mutex mtx_measurments;
 
 std::condition_variable done_variable;
 
@@ -19,15 +19,102 @@ static vector<vector<float>> eksd;
 
 bool message_done = false;
 
+int DCT_size = 8;
+int NumCoef = 64-48;
+int F = 2;
+
+bool isUniform(const cv::Mat& image, double varianceThreshold, string& s) {
+	// Convert to grayscale if it's a color image
+	cv::Mat gray;
+	if (image.channels() == 3) {
+		cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+	}
+	else {
+		gray = image.clone();
+	}
+
+	// Calculate the mean and standard deviation (stddev)
+	cv::Scalar mean, stddev;
+	cv::meanStdDev(gray, mean, stddev);
+
+	// Compute the variance (stddev^2)
+	double variance = stddev[0] * stddev[0];
+
+	// Print the mean and variance for debugging
+	std::cout << "Mean intensity: " << mean[0] << std::endl;
+	std::cout << "Variance of intensities: " << variance << std::endl;
+	s = std::to_string(mean[0]);
+	// If the variance is below the threshold, the image is considered uniform
+	return variance < varianceThreshold;
+}
+
+cv::Mat createDCTMatrix(int N) {
+	cv::Mat dctMatrix(N, N, CV_32F);
+
+	float alpha0 = sqrt(1.0 / N);
+	float alpha = sqrt(2.0 / N);
+
+	for (int i = 0; i < N; ++i) {
+		for (int j = 0; j < N; ++j) {
+			if (i == 0) {
+				dctMatrix.at<float>(i, j) = alpha0 * cos((CV_PI * (2 * j + 1) * i) / (2 * N));
+			}
+			else {
+				dctMatrix.at<float>(i, j) = alpha * cos((CV_PI * (2 * j + 1) * i) / (2 * N));
+			}
+		}
+	}
+
+	return dctMatrix;
+}
+
+void zeroOutSmallestElements(cv::Mat& mat, int M) {
+	// Flatten the matrix to a vector
+	if (!mat.isContinuous()) {
+		mat = mat.clone();
+	}
+
+	// Flatten the matrix to a vector
+	cv::Mat flatMat = mat.reshape(1, mat.total());
+
+	// Convert to a vector of pairs (value, index)
+	std::vector<std::pair<float, int>> vec;
+	for (int i = 0; i < flatMat.total(); ++i) {
+		vec.push_back(std::make_pair(abs(flatMat.at<float>(i)), i));
+	}
+
+	// Sort the vector by magnitude
+	sort(vec.begin(), vec.end());
+
+	// Zero out the M smallest elements
+	for (int i = 0; i < M; ++i) {
+		int idx = vec[i].second;
+		flatMat.at<float>(idx) = 0;
+	}
+
+	// Reshape the vector back to the original matrix size
+	mat = flatMat.reshape(1, mat.rows);
+}
+
+
+
+void generateC(vector<float>& Phi_alt, int n) {
+	vec_fill(Phi_alt, 0.0f);
+	for (int i = 0; i < n; i++) {
+		Phi_alt[i * n + i] = 1.0f;
+	}
+}
+
 int num_tiles = 0;
 int processed_tiles = 0;
-
+std::vector<string> progress(101, "Empty");
+std::vector<thread> threads_cpu_gpu;
 // returns the index of a core where nothing has been scheduled on it yet
 unsigned long get_free_core(string source) {
 
 	std::random_device dev;
 	std::mt19937 rng(dev());
-	std::uniform_int_distribution<std::mt19937::result_type> dist(0, cores.size() - 1); 
+	std::uniform_int_distribution<std::mt19937::result_type> dist(0, cores.size() - 1);
 
 	bool foundFreeCore = false;
 	bool atLaestOneCoreFree = false;
@@ -53,11 +140,6 @@ unsigned long get_free_core(string source) {
 		{
 			cores[index] = source;
 			foundFreeCore = true;
-			mtx_print.lock();
-			for (int i = 0; i < cores.size(); i++) {
-				//std::cout << cores[i] << " " << i<<" "<<std::endl;
-			}
-			mtx_print.unlock();
 			return 1 << index;
 		}
 	}
@@ -84,7 +166,7 @@ vector<vector<float>> fill_eks(int n) {
 }
 
 // used to send messeges to the python code
-void send_messege(StatusCallback callback, string s) {
+inline void send_messege(StatusCallback callback, string s) {
 	char message[50];
 	sprintf(message, s.c_str());
 	callback(message);
@@ -95,8 +177,8 @@ void generateIDCT(vector<float>& IDCT, int n)
 	vector<float> ek(n);
 	vector<float> psi(n);
 
-	int numThreads = omp_get_max_threads();
-	#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
+	int numThreads = 24;
+#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
 	for (int i = 0; i < n; i++)
 	{
 		vec_fill(ek, 0.0f);
@@ -115,8 +197,8 @@ float generate_dictionary(map<string, cl::Buffer>& buffers_gpu, cl::Context cont
 
 	int width = size;
 	int height = size;
-	int n = width * height;
-	int m = n;
+	int n = size * size;
+	int m = size * (size - 16);
 	int T = 12;
 	int k = 0;
 
@@ -148,11 +230,24 @@ float generate_dictionary(map<string, cl::Buffer>& buffers_gpu, cl::Context cont
 	queue.finish();
 	buffers_gpu["buffer_A_t"] = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(float) * n * m);
 
+	vector<float> aux(n * m);
+	queue.enqueueReadBuffer(buffers_gpu["buffer_A"], CL_TRUE, 0, sizeof(float) * aux.size(), aux.data());
+	float first = aux[0];
+	float second = aux[1];
+	float last = aux[aux.size() - 1];
+	queue.finish();
+
 	kernels["transpose"].setArg(0, buffers_gpu["buffer_A"]);
 	kernels["transpose"].setArg(1, buffers_gpu["buffer_A_t"]);
-	kernels["transpose"].setArg(2, n);
-	kernels["transpose"].setArg(3, m);
+	kernels["transpose"].setArg(2, m);
+	kernels["transpose"].setArg(3, n);
 	err = queue.enqueueNDRangeKernel(kernels["transpose"], cl::NullRange, cl::NDRange(n, m), cl::NDRange(16, 16));
+	queue.finish();
+
+	queue.enqueueReadBuffer(buffers_gpu["buffer_A_t"], CL_TRUE, 0, sizeof(float) * aux.size(), aux.data());
+	float first1 = aux[0];
+	float second2 = aux[1];
+	float last2 = aux[aux.size() - 1];
 	queue.finish();
 
 	// this is the maxium eigen value of the dictionary, it's neeed for the algorithm that is used to reconstruct the original signal
@@ -201,31 +296,30 @@ void ADM_cpu(map<string, std::vector<float>>& buffers,
 	int A_cols, int A_rows, float max_eig, float beta, float tau, int iterations, int index1, int index2, std::vector<float>& sol)
 {
 
-	int n = A_cols;
-	int m = A_rows;
+	int N = A_cols;
+	int M = A_rows;
 
 	float gamma = 1.99f - (tau * max_eig);
 
-	std::vector<float> buffer_res(n);
-	std::vector<float> buffer_y(m);
-	std::vector<float> buffer_x(n);
-	std::vector<float> buffer_res_aux(n);
+	std::vector<float> buffer_res(M);
+	std::vector<float> buffer_y(M);
+	std::vector<float> buffer_x(N);
+	std::vector<float> buffer_res_aux(N);
 
 	for (int i = 0; i < iterations; i++)
 	{
-		cblas_sgemv(CblasColMajor, CblasTrans, n, n, 1.0, buffers["buffer_A"].data(), n, buffer_x.data(), 1, 0.0, buffer_res.data(), 1);
-		vec_sub_avx(buffer_res, buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)], 1);
+		//cblas_sgemv(CblasColMajor, CblasNoTrans, M, N, 1.0, buffers["buffer_A"].data(), M, buffer_x.data(), 1, 0.0, buffer_res.data(), 1);
 		vec_sub_avx(buffer_res, buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)], 1);
 		vec_scalar_avx(buffer_y, (1 / beta), 1);
 		vec_sub_avx(buffer_res, buffer_y, 1);
-		cblas_sgemv(CblasColMajor, CblasTrans, n, n, 1.0, buffers["buffer_A_t"].data(), n, buffer_res.data(), 1, 0.0, buffer_res_aux.data(), 1);
+		//cblas_sgemv(CblasColMajor, CblasNoTrans, N, M, 1.0, buffers["buffer_A_t"].data(), N, buffer_res.data(), 1, 0.0, buffer_res_aux.data(), 1);
 		vec_sub_avx(buffer_x, buffer_res_aux, 1);
 		shrink(buffer_x, (tau / beta), 1);
-		cblas_sgemv(CblasColMajor, CblasTrans, n, n, 1.0, buffers["buffer_A"].data(), n, buffer_x.data(), 1, 0.0, buffer_res_aux.data(), 1);
-		vec_sub_avx(buffer_res_aux, buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)], 1);
-		vec_scalar_avx(buffer_res_aux, (gamma * beta), 1);
+		//cblas_sgemv(CblasColMajor, CblasNoTrans, M, N, 1.0, buffers["buffer_A"].data(), M, buffer_x.data(), 1, 0.0, buffer_res.data(), 1);
+		vec_sub_avx(buffer_res, buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)], 1);
+		vec_scalar_avx(buffer_res, (gamma * beta), 1);
 		vec_scalar_avx(buffer_y, (1 / (1 / beta)), 1);
-		vec_sub_avx(buffer_y, buffer_res_aux, 1);
+		vec_sub_avx(buffer_y, buffer_res, 1);
 	}
 
 	sol = buffer_x;
@@ -275,38 +369,23 @@ std::vector <float> ADM_gpu(map<string, cl::Buffer>& buffers,
 
 // this recontructs an image tile
 void decrypt_data(cv::Mat& out, map<string, cl::Buffer>& buffers, openCLContext cl_data, map<string, cl::Kernel> kernels, uint32_t tile_size, vector<float>& sol_alt, float max_eig, int index1, int index2, int iterations) {
-	cl_int err;
 
 	cv::Mat img = cv::Mat::zeros(cv::Size(tile_size, tile_size), CV_8U);
 
-	int width = img.size[1];
-	int height = img.size[0];
-	size_t n = width * height;
-	size_t m = n;
-	int T = 1;
-	int k = 0;
-	vector<float> res(m);
-	vector<float> ek(n);
-	vector<float> psi(n);
+	size_t n = img.size[1] * img.size[0];
 	vector<float> x1(n);
 	vector<float> s1(n);
 
 	cv::Mat reconstructedImg;
 	out.convertTo(reconstructedImg, CV_32FC1);
 
-	float beta = 0.000001f;
-	float tau = 0.000001f;
-
 	s1 = sol_alt;
-	float o = s1[n - 1];
+	//std::reverse(s1.begin(), s1.end());
 	vec_fill(x1, 0.0f);
-	vec_fill(ek, 0.0f);
-	vec_fill(psi, 0.0f);
 
 	// the contents of eksd are initially always the same so we can compute this just once, 
 	// we need to make a copy becasuse this variable will be modified afterwards,
 	// it's worth making a copy every time because it's still faster than computing it every time
-
 	vector<vector<float>> eks = eksd;
 
 	for (int i = 0; i < n; i++)
@@ -315,16 +394,12 @@ void decrypt_data(cv::Mat& out, map<string, cl::Buffer>& buffers, openCLContext 
 		vec_add_avx(x1, eks[i], 1);
 	}
 
-	k = 0;
-
-	for (int i = 0; i < img.rows; i++)
-	{
-		for (int j = 0; j < img.cols; j++)
-		{
-			reconstructedImg.at<float>(j, i) = x1[k++];
+	for (int i = 0; i < img.rows; i++) {
+		for (int j = 0; j < img.cols; j += 16) { // Process 16 elements at a time
+			__m512 data = _mm512_loadu_ps(&x1[i * img.rows + j]); // Load 16 floats from x1
+			_mm512_storeu_ps(&reconstructedImg.at<float>(i, j), data); // Store 16 floats to reconstructedImg
 		}
 	}
-	k = 0;
 
 	reconstructedImg.convertTo(reconstructedImg, CV_8U);
 	out = reconstructedImg;
@@ -340,15 +415,16 @@ void decrypt_data_gpu(StatusCallback callback, cv::Mat out, map<string, cl::Buff
 
 	cv::merge(channels, 3, out);
 
-	std::cout << "GPU decrypted tile " + std::to_string(index) + "\n";
-	string s = "GPU decrypted tile " + std::to_string(index);
-	std::thread t(send_messege, callback, s);
-	t.detach();
-
 	// incrementing the number of tiles that have finished decrypting 
 	// when all tiles have been decrypted we notify the main thread since this thread has been detached from it
 	mtx_processed_tiles.lock();
 	processed_tiles++;
+	float aux = (float(processed_tiles) / float(num_tiles)) * 100;
+	if (progress[int(aux)] == "Empty") {
+		progress[int(aux)] = "Done";
+		string s = "tile " + std::to_string(aux);
+		send_messege(callback, s);
+	}
 	mtx_processed_tiles.unlock();
 
 	if (num_tiles == processed_tiles) {
@@ -368,60 +444,54 @@ void decrypt_image_gpu(openCLContext cl_data, StatusCallback callback, cv::Mat& 
 	kernels["vec_sub_gpu_sp"] = cl::Kernel(cl_data.program, "vec_sub_gpu_sp");
 	kernels["shrink_gpu_sp"] = cl::Kernel(cl_data.program, "shrink_gpu_sp");
 
-	float beta = 0.000001f;
-	float tau = 0.000001f;
+	float tau = 0.000001;
+	float beta = 0.0001;
 
 	int n = TILE_SIZE * TILE_SIZE;
+	int m = TILE_SIZE * (TILE_SIZE - 16);
 
 
 	vector<vector<float>> sol_alts(3, vector<float>(n));
 	std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 
 	for (int i = 0; i < 3; i++) {
-		sol_alts[i] = ADM_gpu(buffers, n, n, max_eig, beta, tau, iterations, cl_data, kernels, index, i);
+		sol_alts[i] = ADM_gpu(buffers, n, m, max_eig, beta, tau, iterations, cl_data, kernels, index, i);
 	}
 
-	std::thread thread_decrypt_GPU(decrypt_data_gpu, callback, out, buffers, cl_data, kernels, TILE_SIZE, sol_alts, max_eig, index, iterations);
+	threads_cpu_gpu[index] = std::thread{ decrypt_data_gpu, callback, out, buffers, cl_data, kernels, TILE_SIZE, sol_alts, max_eig, index, iterations };
 	mtx_cores.lock();
 	static long core_decrypt_data_gpu = get_free_core("decrypt_data_gpu");
-	SetThreadAffinityMask(thread_decrypt_GPU.native_handle(), core_decrypt_data_gpu);
+	SetThreadAffinityMask(threads_cpu_gpu[index].native_handle(), core_decrypt_data_gpu);
 	mtx_cores.unlock();
 	// what needs to be calculated in decrypt_data_gpu blocks the execution of the next tile but we don't actually need to wait for this 
 	// so we can detach the thread at this point
-	thread_decrypt_GPU.detach();
 }
 
 // the dictionary is generated by multiplying the encryption matrix
 // with a matrix composed of inverse cosine transforms for every position in the encrypted signal
 
-float generate_dictionary(map<string, vector<float>>& buffers_cpu, uint32_t size, float seed = 1) {
+float generate_dictionary(map<string, vector<float>>& buffers_cpu, uint32_t size) {
 
-	int width = size;
-	int height = size;
-	size_t n = width * height;
-	size_t m = n;
-	int T = 12;
-	int k = 0;
-	vector<float> buffer_A(n * m);
-	vector<float> buffer_A_t(n * m);
-	k = 0;
-	float sum = 0.0f;
+	int N = size * size;
+	int M = N / F;
+	float tau = 0.000001;
+	float beta = 0.0001;
 
-	vector<float> IDCT_alt(n * n, 0.0f);
-	generateIDCT(IDCT_alt, n);
-	Matrix<float> transpose(n, n);
-	transpose.data = IDCT_alt;
+	buffers_cpu["buffer_A"] = buffers_cpu["buffer_phi"];
 
-	matrix_mult_avx512(transpose.data, buffers_cpu["buffer_phi"], buffer_A, n, m, n);
+	Matrix<float> transpose(N, M);
+	transpose.data = buffers_cpu["buffer_A"];
+	transpose.transposeMatrix();
+	buffers_cpu["buffer_A_t"] = transpose.data;
 
-	float max_eig = eigen_aprox_polynomial(width);
+	vec_scalar_avx(buffers_cpu["buffer_A_t"], tau, 1);
 
-	return max_eig;
+	return eigen_aprox_polynomial(size);
 }
 
 float generate_dictionary(map<string, cl::Buffer>& buffers_gpu, map<string, vector<float>>& buffers_cpu, cl::Context context, cl::CommandQueue queue, map<string, cl::Kernel> kernels, uint32_t size, cl::Device device, cl::Program program, float seed = 1) {
 	int err = 0;
-	
+
 	int width = size;
 	int height = size;
 	int n = width * height;
@@ -493,39 +563,28 @@ void encrypt_data(cv::Mat& img, map<string, cl::Buffer>& buffers, map<string, st
 {
 	cl_int err;
 
-	int width = img.size[1];
-	int height = img.size[0];
-	int n = width * height;
-	int m = n;
-	int k = 0;
-	vector<float> res(m);
+	int n = (tile_size * tile_size);
+	int m = (tile_size * (tile_size - 16));
+	vector<float> res(tile_size * (tile_size - 16));
 	vector<float> x(n);
-	vector<float> x_aux(n);
 
 	buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)] = cl::Buffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * n);
 
 	cv::Mat floatImg;
 	img.convertTo(floatImg, CV_32FC1);
 
-	k = 0;
-
-	for (int i = 0; i < floatImg.rows; i++)
-	{
-		for (int j = 0; j < floatImg.cols; j++)
-		{
-			x[k++] = floatImg.at<float>(j, i);
+	for (int i = 0; i < floatImg.rows; i++) {
+		for (int j = 0; j < floatImg.cols; j += 16) { // Process 16 elements at a time
+			__m512 data = _mm512_loadu_ps(&floatImg.at<float>(i, j)); // Load 16 floats
+			_mm512_storeu_ps(&x[i * floatImg.rows + j], data); // Store 16 floats
 		}
 	}
-
-	x_aux = x;
-
-	float sum = 0.0f;
 
 	buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = cl::Buffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * m);
 
 	size_t globalSize[1] = { m };
 
-	cl_data.queue.enqueueWriteBuffer(buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * x_aux.size(), x_aux.data());
+	cl_data.queue.enqueueWriteBuffer(buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * x.size(), x.data());
 
 	kernels["mat_vec_mul_gpu_fp32"].setArg(0, buffers["buffer_phi"]);
 	kernels["mat_vec_mul_gpu_fp32"].setArg(1, buffers["buffer_vec_decrypt" + std::to_string(index1) + "_" + std::to_string(index2)]);
@@ -538,7 +597,10 @@ void encrypt_data(cv::Mat& img, map<string, cl::Buffer>& buffers, map<string, st
 	cl_data.queue.enqueueReadBuffer(buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)], CL_TRUE, 0, sizeof(float) * res.size(), res.data());
 
 	// storing the encrypted data
+	mtx_measurments.lock();
 	measurments["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = res;
+	std::reverse(res.begin(), res.end());
+	mtx_measurments.unlock();
 
 	cl_data.queue.finish();
 }
@@ -564,10 +626,15 @@ void encrypt_image(openCLContext cl_data, StatusCallback callback, cv::Mat& img,
 		encrypt_data(channels[i], buffers, measurments, cl_data, kernels, TILE_SIZE, index, i);
 	}
 
-	std::cout << "GPU encrypted tile " + std::to_string(index) + "\n";
-	string s = "GPU encrypted tile " + std::to_string(index);
-	std::thread t(send_messege, callback, s);
-	t.detach();
+	mtx_processed_tiles.lock();
+	processed_tiles++;
+	float aux = (float(processed_tiles) / float(num_tiles)) * 100;
+	if (progress[int(aux)] == "Empty") {
+		progress[int(aux)] = "Done";
+		string s = "tile " + std::to_string(aux);
+		send_messege(callback, s);
+	}
+	mtx_processed_tiles.unlock();
 }
 
 // the encryption matrix is a random matrix generated using the seeds from the passphrase
@@ -585,12 +652,12 @@ void generate_decryption_matrix(map<string, cl::Buffer>& buffers_gpu, map<string
 
 	int chunk_size = (m * n) / seeds.size();
 
-	int numThreads = omp_get_max_threads();
+	int numThreads = 24;
 	#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
 	for (int i = 0; i < seeds.size(); i++) {
 		vec_rand(Phi_alt, 1, seeds[i], chunk_size * i, chunk_size * i + chunk_size);
 	}
-
+	//generateC(Phi_alt, n);
 
 	buffers_gpu["buffer_phi"] = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(float) * Phi_alt.size(), NULL, NULL);
 
@@ -607,18 +674,18 @@ void generate_decryption_matrix(map<string, cl::Buffer>& buffers_gpu, cl::Contex
 	int width = size;
 	int height = size;
 	size_t n = width * height;
-	size_t m = n;
+	size_t m = size * (size - 16);
 
 	vector<float> Phi_alt(m * n);
 
 	int chunk_size = (m * n) / seeds.size();
 
-	int numThreads = omp_get_max_threads();
+	int numThreads = 24;
 	#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
 	for (int i = 0; i < seeds.size(); i++) {
 		vec_rand(Phi_alt, 1, seeds[i], chunk_size * i, chunk_size * i + chunk_size);
 	}
-
+	//generateC(Phi_alt, n);
 	buffers_gpu["buffer_phi"] = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(float) * Phi_alt.size(), NULL, NULL);
 	queue.enqueueWriteBuffer(buffers_gpu["buffer_phi"], CL_TRUE, 0, sizeof(float) * Phi_alt.size(), Phi_alt.data());
 	queue.finish();
@@ -627,21 +694,19 @@ void generate_decryption_matrix(map<string, cl::Buffer>& buffers_gpu, cl::Contex
 void generate_decryption_matrix(map<string, vector<float>>& buffers_cpu, uint32_t size, vector<unsigned int> seeds) {
 	cl_int err;
 
-	int width = size;
-	int height = size;
-	size_t n = width * height;
-	size_t m = n;
+	int N = size * size;
+	int M = N / F;
 
-	vector<float> Phi_alt(m * n);
+	vector<float> Phi_alt(N * M);
 
-	int chunk_size = (m * n) / seeds.size();
+	int chunk_size = (N * M) / seeds.size();
 
-	int numThreads = omp_get_max_threads();
+	int numThreads = 24;
 	#pragma omp parallel for num_threads(numThreads) schedule(dynamic)
 	for (int i = 0; i < seeds.size(); i++) {
 		vec_rand(Phi_alt, 1, seeds[i], chunk_size * i, chunk_size * i + chunk_size);
 	}
-
+	//generateC(Phi_alt, n);
 	buffers_cpu["buffer_phi"] = Phi_alt;
 }
 
@@ -700,41 +765,24 @@ vector<unsigned int> passord_to_seeds(string& password) {
 
 void encrypt_data(cv::Mat& img, map<string, vector<float>>& buffers, map<string, std::vector<float>>& measurments, uint32_t tile_size, int index1, int index2)
 {
-	cl_int err;
+	size_t N = img.size[1] * img.size[0];
+	size_t M = N / F;
 
-	int width = img.size[1];
-	int height = img.size[0];
-	size_t n = width * height;
-	size_t m = n;
-	int k = 0;
-	vector<float> res(m);
-	vector<float> x(n);
-	vector<float> x_aux(n);
+	//cv::Mat flatMat = compress_data(img, DCT_size, NumCoef);
 
-	cv::Mat floatImg;
-	img.convertTo(floatImg, CV_32FC1);
+	std::vector<float> vec;
+	//vec.assign((float*)flatMat.datastart, (float*)flatMat.dataend);
 
-	k = 0;
+	std::vector<float> res(M);
 
-	for (int i = 0; i < floatImg.rows; i++)
-	{
-		for (int j = 0; j < floatImg.cols; j++)
-		{
-			x[k++] = floatImg.at<float>(j, i);
-		}
-	}
+	//cblas_sgemv(CblasColMajor, CblasNoTrans, M, N, 1.0, buffers["buffer_phi"].data(), M, vec.data(), 1, 0.0, res.data(), 1);
 
-	x_aux = x;
-
-	float sum = 0.0f;
-
-	vector<float> b(m);
-	buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = b;
-	measurments["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = b;
-	matrix_vector_mult_avx512(buffers["buffer_phi"], x_aux, buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)], n, m);
+	buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = res;
 
 	// storing the encrypted data
+	mtx_measurments.lock();
 	measurments["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)] = buffers["buffer_b" + std::to_string(index1) + "_" + std::to_string(index2)];
+	mtx_measurments.unlock();
 }
 
 void encrypt_image(StatusCallback callback, cv::Mat& img, map<string, vector<float>>& buffers, map<string, std::vector<float>>& measurments, uint32_t TILE_SIZE, int index) {
@@ -748,83 +796,39 @@ void encrypt_image(StatusCallback callback, cv::Mat& img, map<string, vector<flo
 		encrypt_data(channels[i], buffers, measurments, TILE_SIZE, index, i);
 	}
 
-	std::cout << "CPU encrypted tile " + std::to_string(index) + "\n";
-	string s = "CPU encrypted tile " + std::to_string(index);
-	std::thread t(send_messege, callback, s);
-	t.detach();
+	mtx_processed_tiles.lock();
+	processed_tiles++;
+	float aux = (float(processed_tiles) / float(num_tiles)) * 100;
+	if (progress[int(aux)] == "Empty") {
+		progress[int(aux)] = "Done";
+		string s = "tile " + std::to_string(aux);
+		send_messege(callback, s);
+	}
+	mtx_processed_tiles.unlock();
 }
 
-void decrypt_data(cv::Mat& out, map<string, vector<float>>& buffers, uint32_t tile_size, vector<float>& sol_alt, float max_eig, int index1, int index2, int iterations) {
-	cl_int err;
-
-	cv::Mat img = cv::Mat::zeros(cv::Size(tile_size, tile_size), CV_8U);
-
-	int width = img.size[1];
-	int height = img.size[0];
-	size_t n = width * height;
-	size_t m = n;
-	int T = 1;
-	int k = 0;
-	vector<float> res(m);
-	vector<float> ek(n);
-	vector<float> psi(n);
-	vector<float> x1(n);
-	vector<float> s1(n);
-
-	cv::Mat reconstructedImg;
-	out.convertTo(reconstructedImg, CV_32FC1);
-
-	float beta = 0.000001f;
-	float tau = 0.000001f;
-
-	s1 = sol_alt;
-	float o = s1[n - 1];
-	vec_fill(x1, 0.0f);
-	vec_fill(ek, 0.0f);
-	vec_fill(psi, 0.0f);
-
-	//static vector<vector<float>> eksd = fill_eks(n);
-	vector<vector<float>> eks = eksd;
-
-	for (int i = 0; i < n; i++)
-	{
-		vec_scalar_avx(eks[i], s1[i], 1);
-		vec_add_avx(x1, eks[i], 1);
-	}
-
-	k = 0;
-
-	for (int i = 0; i < img.rows; i++)
-	{
-		for (int j = 0; j < img.cols; j++)
-		{
-			reconstructedImg.at<float>(j, i) = x1[k++];
-		}
-	}
-	k = 0;
-
-	reconstructedImg.convertTo(reconstructedImg, CV_8U);
-	out = reconstructedImg;
-}
 
 void decrypt_data_cpu(StatusCallback callback, cv::Mat& out, map<string, vector<float>>& buffers, int TILE_SIZE, vector<vector<float>> sol_alts, float max_eig, int index, int iterations) {
 	cv::Mat channels[3];
 	cv::split(out, channels);
 
 	for (int i = 0; i < 3; i++) {
-		decrypt_data(channels[i], buffers, TILE_SIZE, sol_alts[i], max_eig, index, i, iterations);
+		//decrypt_data(channels[i], buffers, TILE_SIZE, sol_alts[i], max_eig, index, i, iterations);
 	}
 
 	cv::merge(channels, 3, out);
-	std::cout << "CPU decrypted tile " + std::to_string(index) + "\n";
-	string s = "CPU decrypted tile " + std::to_string(index);
-	std::thread t(send_messege, callback, s);
-	t.detach();
 
 	// incrementing the number of tiles that have finished decrypting 
 	// when all tiles have been decrypted we notify the main thread since this thread has been detached from it;
 	mtx_processed_tiles.lock();
 	processed_tiles++;
+	float aux = (float(processed_tiles) / float(num_tiles)) * 100;
+	if (progress[int(aux)] == "Empty") {
+		progress[int(aux)] = "Done";
+		string s = "tile " + std::to_string(aux);
+		std::cout << s << std::endl;
+		send_messege(callback, s);
+	}
 	mtx_processed_tiles.unlock();
 
 	if (num_tiles == processed_tiles) {
@@ -834,21 +838,20 @@ void decrypt_data_cpu(StatusCallback callback, cv::Mat& out, map<string, vector<
 }
 
 void decrypt_image(StatusCallback callback, cv::Mat& out, map<string, vector<float>>& buffers, uint32_t TILE_SIZE, float max_eig, int index, int iterations) {
-	//std::cout << "decrypt_image CPU got core : " << GetCurrentProcessorNumber() << std::endl;
 
-	
 	int n = TILE_SIZE * TILE_SIZE;
+	int m = n / F;
 	vector<vector<float>> sol_alts(3, vector<float>(n));
 
-	float beta = 0.000001f;
-	float tau = 0.000001f;
+	float tau = 0.000001;
+	float beta = 0.0001;
 
 
 	// every color channel can be decrypted in parallel
 	vector<std::thread> CPUThreads(3);
-	
+
 	for (int i = 0; i < 3; i++) {
-		CPUThreads[i] = std::thread(ADM_cpu, std::ref(buffers), n, n, max_eig, beta, tau, iterations, index, i, std::ref(sol_alts[i]));
+		CPUThreads[i] = std::thread(ADM_cpu, std::ref(buffers), n, m, max_eig, beta, tau, iterations, index, i, std::ref(sol_alts[i]));
 	}
 
 	mtx_cores.lock();
@@ -865,12 +868,11 @@ void decrypt_image(StatusCallback callback, cv::Mat& out, map<string, vector<flo
 		CPUThreads[i].join();
 	}
 
-	std::thread thread_decrypt_CPU(decrypt_data_cpu, callback, std::ref(out), std::ref(buffers), TILE_SIZE, sol_alts, max_eig, index, iterations);
+	threads_cpu_gpu[index] = std::thread{ decrypt_data_cpu, callback, std::ref(out), std::ref(buffers), TILE_SIZE, sol_alts, max_eig, index, iterations };
 	mtx_cores.lock();
 	static long core_decrypt_data_cpu = get_free_core("decrypt_data_cpu");
-	SetThreadAffinityMask(thread_decrypt_CPU.native_handle(), core_decrypt_data_cpu);
+	SetThreadAffinityMask(threads_cpu_gpu[index].native_handle(), core_decrypt_data_cpu);
 	mtx_cores.unlock();
-	thread_decrypt_CPU.detach();
 }
 
 
@@ -895,16 +897,16 @@ void GPUProcessingTaskEncryption(openCLContext cl_data, StatusCallback callback,
 }
 
 void CPUProcessingTask(StatusCallback callback, std::vector<int>& available_tiles, std::vector<cv::Mat>& array_of_images_out, map<string, vector<float>>& buffers, uint32_t TILE_SIZE, float max_eig, int iterations) {
-	
+
 	mtx_tile.lock();
 	int index = retAvailableTile(available_tiles); // we get a tile that hasn't been processed yet
 	mtx_tile.unlock();
-	//std::cout << "CPU got tile " << std::to_string(index) << std::endl;
+
 	if (index > -1) {
 		decrypt_image(callback, array_of_images_out[index], buffers, TILE_SIZE, max_eig, index, iterations);
 		CPUProcessingTask(callback, available_tiles, array_of_images_out, buffers, TILE_SIZE, max_eig, iterations);
 	}
-	
+
 }
 
 void GPUProcessingTask(openCLContext cl_data, StatusCallback callback, std::vector<int>& available_tiles, std::vector<cv::Mat>& array_of_images_out, map<string, cl::Buffer>& buffers, uint32_t TILE_SIZE, float max_eig, int iterations) {
@@ -912,7 +914,7 @@ void GPUProcessingTask(openCLContext cl_data, StatusCallback callback, std::vect
 	mtx_tile.lock();
 	int index = retAvailableTile(available_tiles); // we get a tile that hasn't been processed yet
 	mtx_tile.unlock();
-	//std::cout << "GPU got tile " << std::to_string(index) << std::endl;
+
 	if (index > -1) {
 		decrypt_image_gpu(cl_data, callback, array_of_images_out[index], buffers, TILE_SIZE, max_eig, index, iterations);
 		GPUProcessingTask(cl_data, callback, available_tiles, array_of_images_out, buffers, TILE_SIZE, max_eig, iterations);
@@ -966,10 +968,6 @@ encryptionImage encryptImage(StatusCallback callback,
 	int N = processed_width / TILE_SIZE;
 	int M = processed_height / TILE_SIZE;
 
-	char message[50];
-	sprintf(message, "Number of tiles %d", (N * M));
-	callback(message);
-
 	// initializing opencl context
 	openCLContext cl_data;
 	createOpenCLcontext(cl_data, "gfx1100");
@@ -1002,6 +1000,12 @@ encryptionImage encryptImage(StatusCallback callback,
 
 	vector<std::thread> GPUProcessing(1);
 	vector<std::thread> CPUProcessing(1);
+
+	num_tiles = N * M;
+
+	for (auto& i : progress)
+		i = "Empty";
+	processed_tiles = 0;
 
 	// starting threads which process each tile based on the type of acceleration
 	switch (acceleration) {
@@ -1049,7 +1053,7 @@ encryptionImage encryptImage(StatusCallback callback,
 
 	std::vector<float> data_array;
 
-	for (int i = 0; i < array_of_images.size(); i++) {
+	for (int i = 0; i < array_of_processed_images.size(); i++) {
 		for (int j = 0; j < 3; j++) {
 			data_array.insert(data_array.end(), measurments["buffer_b" + std::to_string(i) + "_" + std::to_string(j)].begin(), measurments["buffer_b" + std::to_string(i) + "_" + std::to_string(j)].end());
 		}
@@ -1097,12 +1101,6 @@ void decryptImage(StatusCallback callback,
 
 	num_tiles = (N * M);
 
-	char message[50];
-	sprintf(message, "Number of tiles %d", (N * M));
-	callback(message);
-	sprintf(message, "Acceleration type : %d", acceleration);
-	callback(message);
-
 	// initializing opencl context
 	openCLContext cl_data;
 	createOpenCLcontext(cl_data, "gfx1100");
@@ -1129,12 +1127,12 @@ void decryptImage(StatusCallback callback,
 	for (int i = 0; i < N * M; i++) {
 		for (int j = 0; j < 3; j++) {
 			int firstIndex = index_step;
-			int lastIndex = index_step + (img.TILE_SIZE * img.TILE_SIZE);
-			index_step = index_step + (img.TILE_SIZE * img.TILE_SIZE);
+			int lastIndex = index_step + (img.TILE_SIZE * (img.TILE_SIZE / F));
+			index_step = index_step + (img.TILE_SIZE * (img.TILE_SIZE / F));
 			vector<float>::const_iterator first = img.data_array.begin() + firstIndex;
 			vector<float>::const_iterator last = img.data_array.begin() + lastIndex;
 			vector<float> new_vec(first, last);
-			buffers["buffer_b" + std::to_string(i) + "_" + std::to_string(j)] = cl::Buffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * img.TILE_SIZE * img.TILE_SIZE);
+			buffers["buffer_b" + std::to_string(i) + "_" + std::to_string(j)] = cl::Buffer(cl_data.context, CL_MEM_READ_WRITE, sizeof(float) * img.TILE_SIZE * (img.TILE_SIZE / F));
 			cl_data.queue.enqueueWriteBuffer(buffers["buffer_b" + std::to_string(i) + "_" + std::to_string(j)], CL_TRUE, 0, sizeof(float) * new_vec.size(), new_vec.data());
 		}
 	}
@@ -1144,8 +1142,8 @@ void decryptImage(StatusCallback callback,
 	for (int i = 0; i < N * M; i++) {
 		for (int j = 0; j < 3; j++) {
 			int firstIndex = index_step;
-			int lastIndex = index_step + (img.TILE_SIZE * img.TILE_SIZE);
-			index_step = index_step + (img.TILE_SIZE * img.TILE_SIZE);
+			int lastIndex = index_step + (img.TILE_SIZE * (img.TILE_SIZE / F));
+			index_step = index_step + (img.TILE_SIZE * (img.TILE_SIZE / F));
 			vector<float>::const_iterator first = img.data_array.begin() + firstIndex;
 			vector<float>::const_iterator last = img.data_array.begin() + lastIndex;
 			vector<float> new_vec(first, last);
@@ -1171,22 +1169,27 @@ void decryptImage(StatusCallback callback,
 	//fill_eks(eks_global, img.TILE_SIZE);
 	vector<std::thread> GPUProcessing(1);
 	vector<std::thread> CPUProcessing(1);
-	int kdghsu = 32;
+
+	threads_cpu_gpu.resize(num_tiles);
+
+	for (auto& i : progress)
+		i = "Empty";
+	processed_tiles = 0;
 	// starting threads which process each tile based on the type of acceleration
 	switch (acceleration) {
 	case HYBRID_ACCELERATION:
 		generate_decryption_matrix(buffers, cl_data.context, cl_data.queue, kernels, img.TILE_SIZE, cl_data.device, cl_data.program, seeds);
 		generate_dictionary(buffers, buffers_cpu, cl_data.context, cl_data.queue, kernels, img.TILE_SIZE, cl_data.device, cl_data.program);
 		CPUProcessing[0] = std::thread(CPUProcessingTask, std::ref(callback), std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers_cpu), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
-		
+
 		mtx_cores.lock();
 		static long core_cpu = get_free_core("core_cpu");
 		SetThreadAffinityMask(GetCurrentThread(), core_cpu);
 		mtx_cores.unlock();
-		
-		
+
+
 		GPUProcessing[0] = std::thread(GPUProcessingTask, std::ref(cl_data), std::ref(callback), std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
-		
+
 		mtx_cores.lock();
 		static long core_gpu = get_free_core("core_gpu");
 		SetThreadAffinityMask(GetCurrentThread(), core_gpu);
@@ -1195,8 +1198,8 @@ void decryptImage(StatusCallback callback,
 		break;
 
 	case CPU_ACCELERATION:
-		generate_decryption_matrix(buffers, cl_data.context, cl_data.queue, kernels, img.TILE_SIZE, cl_data.device, cl_data.program, seeds);
-		generate_dictionary(buffers, buffers_cpu, cl_data.context, cl_data.queue, kernels, img.TILE_SIZE, cl_data.device, cl_data.program);
+		generate_decryption_matrix(buffers_cpu, img.TILE_SIZE, seeds);
+		generate_dictionary(buffers_cpu, img.TILE_SIZE);
 		CPUProcessing[0] = std::thread(CPUProcessingTask, std::ref(callback), std::ref(array_of_processed_images), std::ref(array_of_images_out), std::ref(buffers_cpu), std::ref(img.TILE_SIZE), std::ref(max_eig), std::ref(iterations));
 		break;
 
@@ -1243,7 +1246,11 @@ void decryptImage(StatusCallback callback,
 	for (int i = 0; i < array_of_images_out.size(); i++) {
 		//cv::imwrite("CPU decrypted tile " + std::to_string(i), array_of_images_out[i]);
 	}
-	
+
+	for (int i = 0; i < threads_cpu_gpu.size(); i++) {
+		threads_cpu_gpu[i].join();
+	}
+
 	std::unique_lock<std::mutex> lock(mtx_done);
 	done_variable.wait(lock, [] { return message_done == true; });
 
@@ -1286,7 +1293,9 @@ void decryptImage(StatusCallback callback,
 
 void decryptAndWriteFile(StatusCallback callback, const char* input, const char* output, const char* passphrase, int acceleration, int iterations, bool removeNoise) {
 
-	uint32_t TILE_SIZE = 64;
+	char message[50];
+	sprintf(message, "Started decrypting");
+	callback(message);
 
 	encryptionImage img_encrypted;
 	readFromFile(input, img_encrypted);
@@ -1294,19 +1303,20 @@ void decryptAndWriteFile(StatusCallback callback, const char* input, const char*
 	cv::Mat outputImg(cv::Size(img_encrypted.original_width, img_encrypted.original_height), CV_8UC3);
 
 	omp_set_num_threads(1);
-	decryptImage(callback, outputImg, img_encrypted, "5v48v5832v5924", acceleration, 300, false);
+	decryptImage(callback, outputImg, img_encrypted, passphrase, acceleration, iterations, removeNoise);
 
 	cv::imwrite(output, outputImg);
 
-	char message[50];
 	sprintf(message, "Finished decrypting");
 	callback(message);
 }
 
 void encryptAndWriteFile(StatusCallback callback, const char* input, const char* output, const char* passphrase, int TILE_SIZE, int acceleration, bool upscaling_enable) {
-	std::cout << input << std::endl;
-	std::cout << output << std::endl;
+
 	cv::Mat img = cv::imread(input, cv::IMREAD_COLOR);
+	char message[50];
+	sprintf(message, "Started encrypting");
+	callback(message);
 
 	encryptionImage img_encrypted = encryptImage(callback, img, TILE_SIZE, passphrase, acceleration);
 	writeToFile(output, img_encrypted);
@@ -1325,7 +1335,6 @@ void encryptAndWriteFile(StatusCallback callback, const char* input, const char*
 		writeToFile(result, img_encrypted_downsampled);
 	}
 
-	char message[50];
 	sprintf(message, "Finished encrypting");
 	callback(message);
 }
