@@ -38,3 +38,7 @@ Performance :
 
 ~10 seconds to decrypt a 4032 X 3024 image on a Ryzen 7900.
 
+TODO List : 
+
+- [ ] Improve quality of decrypted image, right now there are fair amount of artifacts upon closer insepction.
+
