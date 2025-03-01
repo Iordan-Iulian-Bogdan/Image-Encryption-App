@@ -67,8 +67,6 @@
         int m;
         int rows;
         int cols;
-        indices ind;
-        int* it;
     };
 
     typedef struct {

@@ -225,25 +225,13 @@ float evaluate(
     const float step
 )
 {
-    *(data.it) = *(data.it) + 1;
     float fx = 0;
     copy_x(data.x_copy, (float*)x, data.Axb2, n);
     cv::Mat Ax(data.rows, data.cols, CV_32F, data.x_copy);
     dct(Ax, Ax, cv::DCT_INVERSE);
-
-    if (data.ind.tile_index != -1 && *data.it >= 0) {
-        std::thread CPU_write_imgout;
-
-        CPU_write_imgout = std::thread(write_imgout, std::ref(mats_out), data.ind.tile_index, data.ind.color_c, Ax.clone());
-        CPU_write_imgout.join();
-        //write_imgout(mats_out, data.ind.tile_index, data.ind.color_c, Ax.clone());
-    }
-
     updateAxb2AndComputeFx(data.x_copy, data.ri_x, data.ri_y, data.Axb2, data.b, data.cols, fx, data.m);
     cv::Mat Axb2(data.rows, data.cols, CV_32F, data.Axb2);
-    //Axb2.convertTo(Axb2, CV_32F);
     dct(Axb2, Axb2);
-    //Axb2.convertTo(Axb2, CV_32F);
     eval_g(data.Axb2, g, n);
 
     return fx;
@@ -342,10 +330,6 @@ void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, int k, float p
     data.ri_y = ri_y.data();
     data.rows = rows;
     data.cols = cols;
-    data.ind.color_c = k;
-    data.ind.tile_index = tile_index;
-    data.it = new int;
-    *data.it = 0;
 
     lbfgs_ret = lbfgs(n, (float*)ref[k].data, data, &fx, evaluate, update_progress, NULL, &param);
 
@@ -716,7 +700,7 @@ void process_2(std::vector<float>& stddevs, int scaled_rows, int scaled_cols,
     for (int i = 0; i < result.size(); i++) {
         std::vector<cv::Mat> ref = createRefDCT(scaled_rows, scaled_cols, mats_out[result[i]].clone());
         dimgs[i] = decrypt_image(mats_in[result[i]]);
-        dimgs[i].decrypt(ref, pass, 100, 0.005, true);
+        dimgs[i].decrypt(ref, pass, 50, 0.05, true);
         mtx.lock();
         dimgs[i].get_mat(mats_out[result[i]]);
         mtx.unlock();
@@ -753,7 +737,7 @@ int main(int argc, char* argv)
     inputs_decrypted[3] = "IMG_9321_decrypted.png";
 
     int N = 8, M = 8;
-    int num_threads = 8;
+    int num_threads = 12;
 
     std::vector<cv::Mat> mats_in(N * M);
     mats_out.resize(N * N);
@@ -802,8 +786,8 @@ int main(int argc, char* argv)
         for (int j = 0; j < N; j++) {
             stddevs[i * N + j] = stddevs[i * N + j] / *std::max_element(stddevs.begin(), stddevs.end());// *0.8;
 
-            if (stddevs[i * N + j] < 0.25) {
-                stddevs[i * N + j] = 0.25;
+            if (stddevs[i * N + j] < 0.125) {
+                stddevs[i * N + j] = 0.125;
             }
 
             if (stddevs[i * N + j] > 0.5) {
