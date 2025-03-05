@@ -124,7 +124,8 @@ cv::Mat stitchMats_alt(const std::vector<cv::Mat>& mats, int N, int M) {
 
 class CSencryption {
 protected:
-    cv::Mat decrypted_img, encrypted_img, input_img;
+    cv::Mat encrypted_img, input_img;
+    cv::Mat decrypted_img;
     int rows, cols, m, n;
     std::vector<int> ri_x, ri_y;
 
@@ -402,7 +403,7 @@ std::string retrieveStringFromColorMat(const cv::Mat& colorMat) {
     return text;
 }
 
-class encrypt_image : CSencryption 
+class encrypt_image : CSencryption
 {
 private:
     float bm;
@@ -448,7 +449,7 @@ public:
         }
         text = padding + text;
         cv::Mat colorMat;
-        storeStringInColorMat(text, colorMat); 
+        storeStringInColorMat(text, colorMat);
         std::string retrievedText = retrieveStringFromColorMat(colorMat);
 
         int i = 0;
@@ -479,7 +480,7 @@ private:
         std::vector<cv::Mat> c;
         cv::split(p, c);
 
-        #pragma omp parallel for num_threads(3) schedule(dynamic)
+#pragma omp parallel for num_threads(3) schedule(dynamic)
         for (int i = 0; i < 3; i++) {
             c[i].convertTo(c[i], CV_32F);
             c[i] = c[i] / 255.0;
@@ -549,7 +550,9 @@ public:
         }
 
         for (int i = 0; i < 3; i++) {
-            CPUProcessing[i] = std::thread(reconstruct_color_chanel, std::ref(c[i]), std::ref(encrypted_img), i, coef, optimal_value, rows, cols, std::ref(ri_x), std::ref(ri_y), num_iterations, std::ref(ref), opt, tile_index, true);
+            CPUProcessing[i] = std::thread(reconstruct_color_chanel, std::ref(c[i]), std::ref(encrypted_img), i, coef,
+                optimal_value, rows, cols, std::ref(ri_x), std::ref(ri_y),
+                num_iterations, std::ref(ref), opt, tile_index, true);
         }
 
         for (int i = 0; i < 3; i++) {
@@ -560,25 +563,24 @@ public:
         decrypted_img.convertTo(decrypted_img, CV_8UC3);
     }
 
-    void decrypt_cont(std::vector<cv::Mat>& ref, int seed, int num_iterations, float coef, bool opt, int tile_ind = - 1) {
-         ref = createRefDCT(decrypted_img.rows, decrypted_img.cols, decrypted_img);
+    void decrypt_cont(int seed, int num_iterations, float coef, bool opt, int tile_ind = -1) {
+        std::vector<cv::Mat> ref = createRefDCT(decrypted_img.rows, decrypted_img.cols, decrypted_img);
         int n = rows * cols;
         std::vector<std::thread> CPUProcessing(3);
 
 
-
         for (int i = 0; i < 3; i++) {
-            //reconstruct_color_chanel(c[i], encrypted_img, i, coef, optimal_value, rows, cols, ri_x, ri_y, num_iterations, ref, opt, tile_ind, false);
             CPUProcessing[i] = std::thread(reconstruct_color_chanel, std::ref(c[i]), std::ref(encrypted_img), i, coef,
-                optimal_value, rows, cols, std::ref(ri_x), std::ref(ri_y), num_iterations, ref, opt, tile_ind, false);
+                321, rows, cols, std::ref(ri_x), std::ref(ri_y),
+                num_iterations, std::ref(ref), false, tile_ind, true);
         }
 
         for (int i = 0; i < 3; i++) {
             CPUProcessing[i].join();
         }
 
-        //cv::merge(c, 3, decrypted_img);
-        //decrypted_img.convertTo(decrypted_img, CV_8UC3);
+        cv::merge(c, 3, decrypted_img);
+        decrypted_img.convertTo(decrypted_img, CV_8UC3);
     }
 
     void get_mat(cv::Mat& dest) {
@@ -676,16 +678,15 @@ std::vector<cv::Mat> splitImageIntoTiles(const cv::Mat& image, int tile_width, i
     return tiles;
 }
 
-void process_1(std::vector<float>& stddevs, int scaled_rows, int scaled_cols, 
+void process_1(std::vector<float>& stddevs, int scaled_rows, int scaled_cols,
     std::vector<int>& result, int num_threads, int pass, std::vector<cv::Mat>& mats_in,
-    std::vector<cv::Mat>& mats_out, std::vector<decrypt_image>& dimgs, int N, std::vector<std::vector<cv::Mat>>& refs) {
+    std::vector<cv::Mat>& mats_out, std::vector<decrypt_image>& dimgs) {
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (int i = 0; i < result.size(); i++) {
         std::vector<cv::Mat> ref = createRefDCT(scaled_rows, scaled_cols);
         dimgs[i] = decrypt_image(mats_in[result[i]]);
-        //dimgs[i].decrypt(ref, pass, 10, (0.1 * stddevs[result[i]] <= 0.01) ? 0.01 : 0.1 * stddevs[result[i]], true);
-        dimgs[i].decrypt(ref, pass, 10, 0.05, true);
+        dimgs[i].decrypt(ref, pass, 5, 0.05, true);
         mtx.lock();
         dimgs[i].get_mat(mats_out[result[i]]);
         mtx.unlock();
@@ -694,13 +695,11 @@ void process_1(std::vector<float>& stddevs, int scaled_rows, int scaled_cols,
 
 void process_2(std::vector<float>& stddevs, int scaled_rows, int scaled_cols,
     std::vector<int>& result, int num_threads, int pass, std::vector<cv::Mat>& mats_in,
-    std::vector<cv::Mat>& mats_out, std::vector<decrypt_image>& dimgs, int N, std::vector<std::vector<cv::Mat>>& refs) {
+    std::vector<cv::Mat>& mats_out, std::vector<decrypt_image>& dimgs) {
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (int i = 0; i < result.size(); i++) {
-        std::vector<cv::Mat> ref = createRefDCT(scaled_rows, scaled_cols, mats_out[result[i]].clone());
-        dimgs[i] = decrypt_image(mats_in[result[i]]);
-        dimgs[i].decrypt(ref, pass, 50, 0.05, true);
+        dimgs[i].decrypt_cont(pass, 20, 0.05, true);
         mtx.lock();
         dimgs[i].get_mat(mats_out[result[i]]);
         mtx.unlock();
@@ -708,7 +707,7 @@ void process_2(std::vector<float>& stddevs, int scaled_rows, int scaled_cols,
 }
 
 void display_output(std::string windowName, cv::Mat& temp, int N) {
-    while(g_dsp) {
+    while (g_dsp) {
         cv::waitKey(100);
         copyTilesToImage(mats_out, temp, mats_out[0].cols, mats_out[0].rows, N, N);
         updateImage(windowName, temp);
@@ -736,14 +735,14 @@ int main(int argc, char* argv)
     inputs_decrypted[2] = "IMG_0007_decrypted.png";
     inputs_decrypted[3] = "IMG_9321_decrypted.png";
 
-    int N = 8, M = 8;
-    int num_threads = 12;
+    int N = 11, M = 11;
+    int num_threads = 8;
 
     std::vector<cv::Mat> mats_in(N * M);
     mats_out.resize(N * N);
     cv::Mat img = cv::imread(inputs[0], cv::IMREAD_COLOR);
     cv::resize(img, img, cv::Size(nextClosestDivisible(img.cols, N), nextClosestDivisible(img.rows, M)));
-    mats_in = splitMat(img, N , M);
+    mats_in = splitMat(img, N, M);
     img.deallocate();
 
     if (mats_in[0].rows % 2 != 0) {
@@ -781,7 +780,7 @@ int main(int argc, char* argv)
         }
     }
 
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+#pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < N; j++) {
             stddevs[i * N + j] = stddevs[i * N + j] / *std::max_element(stddevs.begin(), stddevs.end());// *0.8;
@@ -804,7 +803,7 @@ int main(int argc, char* argv)
 
     cv::imwrite("encrypted_img_g.png", encrypted_img_g);
 
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+#pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (int i = 0; i < result.size(); i++) {
         mats_out[i] = cv::Mat::zeros(scaled_rows, scaled_cols, CV_8UC3);
         mats_out[i].setTo(cv::Scalar(255, 255, 255));
@@ -813,7 +812,7 @@ int main(int argc, char* argv)
     std::vector<decrypt_image> dimgs(N * N);
     int pass = 1;
     std::string windowName = "ImageWindow";
-    
+
 
     cv::Mat temp = cv::Mat::zeros(scaled_rows * N, scaled_cols * N, CV_8UC3);
 
@@ -821,13 +820,10 @@ int main(int argc, char* argv)
     *dsp = true;
     std::thread CPU_display_output;
     CPU_display_output = std::thread(display_output, windowName, std::ref(temp), N);
-    
-    std::vector<std::vector<cv::Mat>> ref(N * N);
 
     std::thread CPUProcessing;
-
-    CPUProcessing = std::thread(process_1, std::ref(stddevs), scaled_rows, scaled_cols, std::ref(result), std::ref(num_threads), 
-       pass, std::ref(mats_in), std::ref(mats_out), std::ref(dimgs), N, std::ref(ref));
+    CPUProcessing = std::thread(process_1, std::ref(stddevs), scaled_rows, scaled_cols, std::ref(result),
+        8, pass, std::ref(mats_in), std::ref(mats_out), std::ref(dimgs));
 
     CPUProcessing.join();
 
@@ -836,10 +832,8 @@ int main(int argc, char* argv)
     cv::waitKey(1);
 
     std::thread CPUProcessing2;
-
-    CPUProcessing2 = std::thread(process_2, std::ref(stddevs), scaled_rows, scaled_cols, std::ref(result), std::ref(num_threads),
-        pass, std::ref(mats_in), std::ref(mats_out), std::ref(dimgs), N, std::ref(ref));
-
+    CPUProcessing2 = std::thread(process_2, std::ref(stddevs), scaled_rows, scaled_cols, std::ref(result),
+        8, pass, std::ref(mats_in), std::ref(mats_out), std::ref(dimgs));
 
     CPUProcessing2.join();
     g_dsp = false;
@@ -850,7 +844,3 @@ int main(int argc, char* argv)
     cv::imwrite("result.png", out);
     return 0;
 }
-
-
-
-
