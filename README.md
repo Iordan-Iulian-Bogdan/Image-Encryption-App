@@ -36,7 +36,7 @@ GPU acceleration no longer needed since switching to Limited-memory BFGS using [
 
 Performance : 
 
-~10 seconds to decrypt a 4032 X 3024 image on a Ryzen 7900, though the image itself becomes visible within 2-3 seconds. 
+~5 seconds to decrypt a 4032 X 3024 image on a Ryzen 7900.
 
 TODO List : 
 
