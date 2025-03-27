@@ -1,4 +1,4 @@
-This is an implementation of an encryption algorithm for images using compressive sensing, this is meant to be more of a proof of concept where we use compressive sensing in a novel way to encrypt images. CS is typically used to sample signals in an already compressed format but a by product of this process is that the signal also becomes uniquely encoded upon measurement, this can be used for encryption.
+This is an implementation of an encryption algorithm for images using compressive sensing, this is meant to be more of a proof of concept where we use compressive sensing in a novel way to encrypt images. CS is typically used to sample signals in an already compressed format but a by-product of this process is that the signal also becomes uniquely encoded upon measurement, this can be used for encryption.
 
 The overall algorthm for this is as follows : 
 
@@ -16,7 +16,7 @@ For 𝑖 ← 0 to N , 𝑖 ← 𝑖 + 1 execute // construct dictionary 𝐴
   𝐴 : , 𝑖 = 𝜓 ∗ θ
 End For
 
-𝑠 = 𝐴𝐷𝑀(𝐴, 𝑦, 𝜏,𝛽, 𝑘) // solves the 𝐴 * 𝑥 = 𝑦 equation, where 𝑥 is the unknown encrypted signal using the Alternating Direction Method algorithm
+𝑠 = 𝐴𝐷𝑀(𝐴, 𝑦, 𝜏,𝛽, 𝑘) // solves the 𝐴 * 𝑥 = 𝑦 equation, where 𝑥 is the unknown encrypted signal using LMBFGS
 
 For  𝑖 ← 0 to N , 𝑖 ← 𝑖 + 1 execute // reconstruct signal 𝑥 which now represents the decrypted signal 𝑥′
   𝑒𝑘 = 0
@@ -36,7 +36,7 @@ GPU acceleration no longer needed since switching to Limited-memory BFGS using [
 
 Performance : 
 
-~5 seconds to decrypt a 4032 X 3024 image on a Ryzen 7900.
+~5 seconds to decompress and decrypt a 4032 X 3024 image on a Ryzen 7900.
 
 TODO List : 
 
