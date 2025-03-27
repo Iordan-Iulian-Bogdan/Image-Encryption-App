@@ -196,20 +196,6 @@ inline void copy_x(float* x_copy, float* x, float* Axb2_vec, int n) {
     }
 }
 
-
-void write_imgout(std::vector<cv::Mat>& mats_out, int tile_index, int color_c, cv::Mat Ax) {
-    std::vector<cv::Mat> dst_channels;
-    mtx.lock();
-    cv::split(mats_out[tile_index].clone(), dst_channels);
-    int channel_to_copy = color_c;
-    cv::Mat aux_c = Ax;
-    aux_c = aux_c * 255;
-    aux_c.convertTo(aux_c, CV_8U);
-    dst_channels[channel_to_copy] = aux_c;
-    cv::merge(dst_channels, mats_out[tile_index]);
-    mtx.unlock();
-}
-
 float evaluate(
     void* instance,
     const float* x,
@@ -518,6 +504,14 @@ public:
         cv::imwrite(output_path, encrypted_img);
     }
 
+    cv::Size get_size() {
+        cv::Size tile_size;
+        tile_size.width = cols;
+        tile_size.height = rows;
+
+        return tile_size;
+    }
+
 private:
 
     std::vector<float> analyze(cv::Mat in) {
@@ -646,10 +640,10 @@ public:
         decrypted_img.convertTo(decrypted_img, CV_8UC3);
     }
 
-    void decrypt(std::vector<int> ri_x_g, std::vector<int> ri_y_g, int num_iterations, float coef, bool opt, int tile_index = -1) {
+    void decrypt(std::vector<cv::Mat> ref, std::vector<int>& ri_x_g, std::vector<int>& ri_y_g, int num_iterations, float coef, bool opt, int tile_index = -1) {
         ri_x = ri_x_g;
         ri_y = ri_y_g;
-        std::vector<cv::Mat> ref = createRefDCT(rows, cols);
+        //std::vector<cv::Mat> ref = createRefDCT(rows, cols);
         int n = rows * cols;
         std::vector<std::thread> CPUProcessing(3);
 
@@ -790,7 +784,9 @@ std::vector<cv::Mat> splitImageIntoTiles(const cv::Mat& image, int tile_width, i
 }
 
 void process_1(int num_threads, int pass, std::vector<std::vector<cv::Mat>>& mats_in, std::vector<std::vector<indices>> indices,
-    std::vector<std::vector<cv::Mat>>& mats_out, std::vector<std::string> processing_order, int iterations) {
+    std::vector<std::vector<cv::Mat>>& mats_out, std::vector<std::string> processing_order, int iterations, cv::Size tile_size) {
+    
+    std::vector<cv::Mat> ref = createRefDCT(tile_size.height, tile_size.width);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (int k = 0; k < mats_in[0].size() * mats_in[0].size(); k++) {
@@ -798,13 +794,18 @@ void process_1(int num_threads, int pass, std::vector<std::vector<cv::Mat>>& mat
         int i = std::stoi(splitText[0]);
         int j = std::stoi(splitText[1]);
 
+        std::vector<cv::Mat> copied(3);
+
+        for (int i = 0; i < ref.size(); ++i) {
+            copied[i] = ref[i].clone();
+        }
+
         decrypt_image* dimgs = new decrypt_image;
         *dimgs = decrypt_image(mats_in[i][j]);
-        dimgs->decrypt(indices[i][j].ri_x_g, indices[i][j].ri_y_g, iterations, 0.05, false);
-        //mtx_decryption.lock();
+        dimgs->decrypt(copied, indices[i][j].ri_x_g, indices[i][j].ri_y_g, iterations, 0.05, false);
         dimgs->get_mat(mats_out[i][j]);
-        //mtx_decryption.unlock();
         delete(dimgs);
+
         mats_in[i][j].deallocate();
         indices[i][j].ri_x_g.resize(0);
         indices[i][j].ri_y_g.resize(0);
@@ -812,26 +813,12 @@ void process_1(int num_threads, int pass, std::vector<std::vector<cv::Mat>>& mat
 
 }
 
-void process_2(int num_threads, int pass, std::vector<std::vector<cv::Mat>>& mats_in, std::vector<std::vector<indices>> indices,
-    std::vector<std::vector<cv::Mat>>& mats_out, std::vector<std::vector<decrypt_image>>& dimgs, std::vector<std::string> processing_order) {
-
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (int i = 0; i < mats_in[0].size(); i++) {
-        for (int j = 0; j < mats_in[0].size(); j++) {
-            dimgs[i][j].decrypt_cont(indices[i][j].ri_x_g, indices[i][j].ri_y_g, 15, 0.05, false);
-            dimgs[i][j].get_mat(mats_out[i][j]);
-        }
-    }
-}
-
 void display_output(std::string windowName, cv::Mat& temp, std::vector<std::vector<TileCoord>>& coordinates) {
     while (g_dsp) {
-        //mtx.lock();
         cv::waitKey(10);
         temp = reconstructImage(reconfigured_cropped_out, coordinates);
         updateImage(windowName, temp);
         cv::waitKey(1);
-        //mtx.unlock();
     }
 }
 
@@ -960,15 +947,6 @@ void decrypt_image_tiled(cv::Mat encrypted_img_g, int tiles, int overlap, int it
     //masked_mat = dimgs.get_sampled_mask(1);
     //dimgs.get_sampled_mask_mats(1, sampled_mat, masked_mat);
 
-    for (int i = 0; i < 2; i++) {
-        if (i == 0) {
-            //sampled_mat = dimgs.get_sampled_mat(1);
-        }
-        if (i == 1) {
-            //masked_mat = dimgs.get_sampled_mask(1);
-        }
-    }
-
     //cv::imwrite("sampled_mat.png", sampled_mat);
     //cv::imwrite("sampled_mask.png", masked_mat);
     std::string windowName = "ImageWindow";
@@ -1001,7 +979,7 @@ void decrypt_image_tiled(cv::Mat encrypted_img_g, int tiles, int overlap, int it
     }
 
     std::vector<std::string> result = spiralOrder(matrix);
-
+    cv::Size tile_size;
     #pragma omp parallel for num_threads(nun_threads) schedule(dynamic)
     for (int i = 0; i < N_reconfigured; i++) {
         for (int j = 0; j < N_reconfigured; j++) {
@@ -1022,6 +1000,7 @@ void decrypt_image_tiled(cv::Mat encrypted_img_g, int tiles, int overlap, int it
             indices_reconfigured[i][j] = { ri_x_g, ri_y_g };
             img.encrypt(ri_x_g, ri_y_g);
             img.get_mat(reconfigured_cropped_mats_in[i][j]);
+            tile_size = img.get_size();
             //reconfigured_cropped_masks[i][j].deallocate();
         }
     }
@@ -1029,10 +1008,10 @@ void decrypt_image_tiled(cv::Mat encrypted_img_g, int tiles, int overlap, int it
     cv::Mat reconstructed = cv::Mat::zeros(sampled_mat.rows, sampled_mat.cols, CV_8UC3);
     std::thread CPU_display_output;
     CPU_display_output = std::thread(display_output, windowName, std::ref(reconstructed), std::ref(coordinates));
-
+    
     std::thread CPUProcessing1;
     CPUProcessing1 = std::thread(process_1, nun_threads, 1, std::ref(reconfigured_cropped_mats_in), std::ref(indices_reconfigured),
-        std::ref(reconfigured_cropped_out), std::ref(result), iterations);
+        std::ref(reconfigured_cropped_out), std::ref(result), iterations, tile_size);
     CPUProcessing1.join();
 
     reconstructed = reconstructImage(reconfigured_cropped_out, coordinates);
