@@ -53,11 +53,6 @@
         LBFGS_LINESEARCH_BACKTRACKING_STRONG_WOLFE = 3,
     };
 
-    struct indices {
-        int tile_index;
-        int color_c;
-    };
-
     struct eval_data {
         float* b;
         float* Axb2;

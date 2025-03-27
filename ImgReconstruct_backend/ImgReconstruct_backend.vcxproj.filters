@@ -18,32 +18,11 @@
     <ClCompile Include="ImgReconstruct_backend.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="helper_functions.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Matrix.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="sparseImageEncryption.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="lbfgs.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Matrix.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="helper_functions.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="AVX_functions.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="sparseImageEncryption.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
     <ClInclude Include="arithmetic_ansi.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -52,9 +31,6 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="gpu_kernels.cl">
-      <Filter>Source Files</Filter>
-    </None>
     <None Include="clblast.dll" />
   </ItemGroup>
 </Project>

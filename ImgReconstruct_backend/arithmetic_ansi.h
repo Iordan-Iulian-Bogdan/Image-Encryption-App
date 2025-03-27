@@ -47,21 +47,20 @@ inline static void vecfree(void* memblock)
 }
 
 inline static void vecset(float* x, const float c, const int n) {
-    __m512 vec = _mm512_set1_ps(c);
+    __m256 vec = _mm256_set1_ps(c);
     int i;
-    for (i = 0; i <= n - 16; i += 16) {
-        _mm512_storeu_ps(&x[i], vec);
+    for (i = 0; i <= n - 8; i += 8) {
+        _mm256_storeu_ps(&x[i], vec);
     }
     for (; i < n; ++i) {
         x[i] = c;
     }
 }
 
-
 inline static void veccpy(float* y, const float* x, const int n) {
     int i;
-    for (i = 0; i <= n - 16; i += 16) {
-        _mm512_storeu_ps(&y[i], _mm512_loadu_ps(&x[i]));
+    for (i = 0; i <= n - 8; i += 8) {
+        _mm256_storeu_ps(&y[i], _mm256_loadu_ps(&x[i]));
     }
     for (; i < n; ++i) {
         y[i] = x[i];
@@ -70,9 +69,9 @@ inline static void veccpy(float* y, const float* x, const int n) {
 
 inline static void vecncpy(float* y, const float* x, const int n) {
     int i;
-    __m512 neg_one = _mm512_set1_ps(-1.0f);
-    for (i = 0; i <= n - 16; i += 16) {
-        _mm512_storeu_ps(&y[i], _mm512_mul_ps(_mm512_loadu_ps(&x[i]), neg_one));
+    __m256 neg_one = _mm256_set1_ps(-1.0f);
+    for (i = 0; i <= n - 8; i += 8) {
+        _mm256_storeu_ps(&y[i], _mm256_mul_ps(_mm256_loadu_ps(&x[i]), neg_one));
     }
     for (; i < n; ++i) {
         y[i] = -x[i];
@@ -81,9 +80,9 @@ inline static void vecncpy(float* y, const float* x, const int n) {
 
 inline static void vecadd(float* y, const float* x, const float c, const int n) {
     int i;
-    __m512 factor = _mm512_set1_ps(c);
-    for (i = 0; i <= n - 16; i += 16) {
-        _mm512_storeu_ps(&y[i], _mm512_fmadd_ps(_mm512_loadu_ps(&x[i]), factor, _mm512_loadu_ps(&y[i])));
+    __m256 factor = _mm256_set1_ps(c);
+    for (i = 0; i <= n - 8; i += 8) {
+        _mm256_storeu_ps(&y[i], _mm256_fmadd_ps(_mm256_loadu_ps(&x[i]), factor, _mm256_loadu_ps(&y[i])));
     }
     for (; i < n; ++i) {
         y[i] += c * x[i];
@@ -92,8 +91,8 @@ inline static void vecadd(float* y, const float* x, const float c, const int n) 
 
 inline static void vecdiff(float* z, const float* x, const float* y, const int n) {
     int i;
-    for (i = 0; i <= n - 16; i += 16) {
-        _mm512_storeu_ps(&z[i], _mm512_sub_ps(_mm512_loadu_ps(&x[i]), _mm512_loadu_ps(&y[i])));
+    for (i = 0; i <= n - 8; i += 8) {
+        _mm256_storeu_ps(&z[i], _mm256_sub_ps(_mm256_loadu_ps(&x[i]), _mm256_loadu_ps(&y[i])));
     }
     for (; i < n; ++i) {
         z[i] = x[i] - y[i];
@@ -102,9 +101,9 @@ inline static void vecdiff(float* z, const float* x, const float* y, const int n
 
 inline static void vecscale(float* y, const float c, const int n) {
     int i;
-    __m512 factor = _mm512_set1_ps(c);
-    for (i = 0; i <= n - 16; i += 16) {
-        _mm512_storeu_ps(&y[i], _mm512_mul_ps(_mm512_loadu_ps(&y[i]), factor));
+    __m256 factor = _mm256_set1_ps(c);
+    for (i = 0; i <= n - 8; i += 8) {
+        _mm256_storeu_ps(&y[i], _mm256_mul_ps(_mm256_loadu_ps(&y[i]), factor));
     }
     for (; i < n; ++i) {
         y[i] *= c;
@@ -113,8 +112,8 @@ inline static void vecscale(float* y, const float c, const int n) {
 
 inline static void vecmul(float* y, const float* x, const int n) {
     int i;
-    for (i = 0; i <= n - 16; i += 16) {
-        _mm512_storeu_ps(&y[i], _mm512_mul_ps(_mm512_loadu_ps(&x[i]), _mm512_loadu_ps(&y[i])));
+    for (i = 0; i <= n - 8; i += 8) {
+        _mm256_storeu_ps(&y[i], _mm256_mul_ps(_mm256_loadu_ps(&x[i]), _mm256_loadu_ps(&y[i])));
     }
     for (; i < n; ++i) {
         y[i] *= x[i];
@@ -122,17 +121,17 @@ inline static void vecmul(float* y, const float* x, const int n) {
 }
 
 inline static void vecdot(float* s, const float* x, const float* y, const int n) {
-    __m512 sum = _mm512_setzero_ps(); // Initialize sum to zero
+    __m256 sum = _mm256_setzero_ps();
     int i;
 
-    for (i = 0; i <= n - 16; i += 16) {
-        sum = _mm512_add_ps(sum, _mm512_mul_ps(_mm512_loadu_ps(&x[i]), _mm512_loadu_ps(&y[i])));
+    for (i = 0; i <= n - 8; i += 8) {
+        sum = _mm256_add_ps(sum, _mm256_mul_ps(_mm256_loadu_ps(&x[i]), _mm256_loadu_ps(&y[i])));
     }
 
     // Horizontal sum of all elements in the vector sum
-    float temp[16];
-    _mm512_storeu_ps(temp, sum);
-    *s = temp[0] + temp[1] + temp[2] + temp[3] + temp[4] + temp[5] + temp[6] + temp[7] + temp[8] + temp[9] + temp[10] + temp[11] + temp[12] + temp[13] + temp[14] + temp[15];
+    float temp[8];
+    _mm256_storeu_ps(temp, sum);
+    *s = temp[0] + temp[1] + temp[2] + temp[3] + temp[4] + temp[5] + temp[6] + temp[7];
 
     // Sum the remaining elements
     for (; i < n; ++i) {
