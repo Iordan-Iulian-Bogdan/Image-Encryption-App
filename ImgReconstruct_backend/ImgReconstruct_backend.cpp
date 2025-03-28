@@ -7,6 +7,7 @@
 #include <chrono>
 #include <stdlib.h>
 #include <random>
+#include <iostream>
 
 int nextClosestDivisible(int x, int y) {
     // Ensure y is not zero to avoid division by zero error
@@ -246,7 +247,7 @@ std::vector<cv::Mat> createRefDCT(int rows, int cols) {
 
     for (int i = 0; i < 3; i++) {
         c[i].convertTo(c[i], CV_32F);
-        c[i] = c[i] / 255.0;
+        c[i] = c[i] / 255.0f;
         cv::dct(c[i], c[i], 0);
         c[i] = c[i] / 10.0;
     }
@@ -261,7 +262,7 @@ std::vector<cv::Mat> createRefDCT(int rows, int cols, cv::Mat ref) {
 
     for (int i = 0; i < 3; i++) {
         c[i].convertTo(c[i], CV_32F);
-        c[i] = c[i] / 255.0;
+        c[i] = c[i] / 255.0f;
         cv::dct(c[i], c[i], 0);
     }
 
@@ -286,8 +287,17 @@ void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, int k, float p
     std::vector<float> Axb2(n);
     std::vector<float> x_copy(n);
 
-    for (int i = 11; i < ri_x.size() + 11; ++i) {
-        b.push_back(measurement.at<cv::Vec3b>(i)[k] / 255.0);
+    for (int i = 11; i < ri_x.size() + 11; i++) {
+
+        // Because of the way the sampled tiles are constructed 
+        // it's possible to go out of bounds so we do an aditional check here
+        if (i < measurement.total()) {
+            b.push_back(measurement.at<cv::Vec3b>(i)[k] / 255.0f);
+        }
+        else
+        {
+            b.push_back(0.0f);
+        }
     }
 
     data.b = b.data();
@@ -305,7 +315,7 @@ void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, int k, float p
 
     cv::Mat AtAxb2(rows, cols, CV_32F, (float*)ref[k].data);
     dct(AtAxb2, AtAxb2, cv::DCT_INVERSE);
-    AtAxb2 = AtAxb2 * 255.0;
+    AtAxb2 = AtAxb2 * 255.0f;
     out = AtAxb2;// .clone();
 }
 
@@ -513,26 +523,6 @@ public:
     }
 
 private:
-
-    std::vector<float> analyze(cv::Mat in) {
-        cv::Mat p = in.clone();
-
-        std::vector<cv::Mat> c;
-        std::vector<float> res(3);
-        cv::split(p, c);
-
-
-#pragma omp parallel for num_threads(3) schedule(dynamic)
-        for (int i = 0; i < 3; i++) {
-            c[i].convertTo(c[i], CV_32F);
-            c[i] = c[i] / 255.0;
-            cv::dct(c[i], c[i], 0);
-        }
-        res[0] = c[0].at<float>(0, 0);
-        res[1] = c[1].at<float>(0, 0);
-        res[2] = c[2].at<float>(0, 0);
-        return res;
-    }
 };
 
 class decrypt_image : CSencryption {
@@ -980,6 +970,7 @@ void decrypt_image_tiled(cv::Mat encrypted_img_g, int tiles, int overlap, int it
 
     std::vector<std::string> result = spiralOrder(matrix);
     cv::Size tile_size;
+
     #pragma omp parallel for num_threads(nun_threads) schedule(dynamic)
     for (int i = 0; i < N_reconfigured; i++) {
         for (int j = 0; j < N_reconfigured; j++) {
@@ -1014,12 +1005,11 @@ void decrypt_image_tiled(cv::Mat encrypted_img_g, int tiles, int overlap, int it
         std::ref(reconfigured_cropped_out), std::ref(result), iterations, tile_size);
     CPUProcessing1.join();
 
-    reconstructed = reconstructImage(reconfigured_cropped_out, coordinates);
+    g_dsp = false;
+    CPU_display_output.join();
     cv::Mat blended = blendTilesWithImage(reconfigured_cropped_out, coordinates, reconstructed, 0.5f);
     cv::resize(blended, blended, org_size);
     cv::imwrite("blended.png", blended);
-    g_dsp = false;
-    CPU_display_output.join();
 }
 
 cv::Mat encrypt_image_tiled(cv::Mat input_image, float compression_ratio = 0.5f) {
