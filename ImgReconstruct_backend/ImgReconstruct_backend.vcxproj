@@ -188,12 +188,20 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="CS_encryption.cpp" />
+    <ClCompile Include="helper_functions.cpp" />
+    <ClCompile Include="image_decryption.cpp" />
+    <ClCompile Include="image_encryption.cpp" />
     <ClCompile Include="ImgReconstruct_backend.cpp" />
     <ClCompile Include="lbfgs.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="arithmetic_ansi.h" />
-    <ClInclude Include="lbfgs.h" />
+    <ClInclude Include="CS_encryption.hpp" />
+    <ClInclude Include="helper_functions.hpp" />
+    <ClInclude Include="image_decryption.hpp" />
+    <ClInclude Include="image_encryption.hpp" />
+    <ClInclude Include="lbfgs.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="clblast.dll" />

@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <math.h>
 
-#include "lbfgs.h"
+#include "lbfgs.hpp"
 
 #ifdef  _MSC_VER
 #define inline  __inline
