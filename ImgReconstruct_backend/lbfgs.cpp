@@ -1400,38 +1400,54 @@ static void owlqn_pseudo_gradient(
 {
     int i;
 
-    /* Compute the negative of gradients. */
-    for (i = 0; i < start; ++i) {
-        pg[i] = g[i];
+    // Compute the negative of gradients
+    for (i = 0; i < start; i += 8) {
+        __m256 g_vec = _mm256_load_ps(&g[i]);
+        _mm256_store_ps(&pg[i], g_vec);
     }
 
-    /* Compute the psuedo-gradients. */
-    for (i = start; i < end; ++i) {
-        if (x[i] < 0.) {
-            /* Differentiable. */
-            pg[i] = g[i] - c;
-        }
-        else if (0. < x[i]) {
-            /* Differentiable. */
-            pg[i] = g[i] + c;
-        }
-        else {
-            if (g[i] < -c) {
-                /* Take the right partial derivative. */
-                pg[i] = g[i] + c;
-            }
-            else if (c < g[i]) {
-                /* Take the left partial derivative. */
-                pg[i] = g[i] - c;
-            }
-            else {
-                pg[i] = 0.;
-            }
-        }
+    // Compute the pseudo-gradients
+    __m256 c_vec = _mm256_set1_ps(c);
+    __m256 zero_vec = _mm256_set1_ps(0.0f);
+
+    for (i = start; i < end; i += 8) {
+        __m256 g_vec = _mm256_load_ps(&g[i]);
+        __m256 x_vec = _mm256_load_ps(&x[i]);
+
+        // Masks for conditions
+        __m256 mask_neg = _mm256_cmp_ps(x_vec, zero_vec, _CMP_LT_OS);
+        __m256 mask_pos = _mm256_cmp_ps(x_vec, zero_vec, _CMP_GT_OS);
+
+        // Calculate pseudo-gradients for each case
+        __m256 pg_neg = _mm256_sub_ps(g_vec, c_vec); // g[i] - c
+        __m256 pg_pos = _mm256_add_ps(g_vec, c_vec); // g[i] + c
+
+        // Default pseudo-gradient: g[i] + c (right partial derivative)
+        __m256 pg_default = _mm256_add_ps(g_vec, c_vec);
+
+        // Case when g[i] < -c
+        __m256 mask_left_partial = _mm256_cmp_ps(g_vec, _mm256_sub_ps(zero_vec, c_vec), _CMP_LT_OS);
+        pg_default = _mm256_blendv_ps(pg_default, pg_neg, mask_left_partial);
+
+        // Case when g[i] > c
+        __m256 mask_right_partial = _mm256_cmp_ps(g_vec, c_vec, _CMP_GT_OS);
+        pg_default = _mm256_blendv_ps(pg_default, pg_pos, mask_right_partial);
+
+        // Case when -c <= g[i] <= c
+        __m256 mask_zero = _mm256_andnot_ps(_mm256_or_ps(mask_left_partial, mask_right_partial), _mm256_cmp_ps(x_vec, zero_vec, _CMP_EQ_OS));
+        pg_default = _mm256_blendv_ps(pg_default, zero_vec, mask_zero);
+
+        // Combine results
+        __m256 pg_vec = _mm256_blendv_ps(pg_default, pg_neg, mask_neg);
+        pg_vec = _mm256_blendv_ps(pg_vec, pg_pos, mask_pos);
+
+        _mm256_store_ps(&pg[i], pg_vec);
     }
 
-    for (i = end; i < n; ++i) {
-        pg[i] = g[i];
+    // Compute the negative of gradients for remaining elements
+    for (i = end; i < n; i += 8) {
+        __m256 g_vec = _mm256_load_ps(&g[i]);
+        _mm256_store_ps(&pg[i], g_vec);
     }
 }
 
@@ -1440,11 +1456,30 @@ static void owlqn_project(
     const float* sign,
     const int start,
     const int end
-)
-{
+) {
     int i;
 
-    for (i = start; i < end; ++i) {
+    // Vectorized computation using AVX2
+    for (i = start; i < end; i += 8) {
+        // Load 8 values from arrays d and sign
+        __m256 d_vec = _mm256_load_ps(&d[i]);
+        __m256 sign_vec = _mm256_load_ps(&sign[i]);
+
+        // Compute d[i] * sign[i]
+        __m256 product_vec = _mm256_mul_ps(d_vec, sign_vec);
+
+        // Create a mask for the condition product_vec <= 0
+        __m256 mask = _mm256_cmp_ps(product_vec, _mm256_set1_ps(0.0f), _CMP_LE_OS);
+
+        // Set d[i] = 0 where the condition is true
+        d_vec = _mm256_blendv_ps(d_vec, _mm256_set1_ps(0.0f), mask);
+
+        // Store the result back into the array d
+        _mm256_store_ps(&d[i], d_vec);
+    }
+
+    // Handle remaining elements (if end - start is not a multiple of 8)
+    for (; i < end; ++i) {
         if (d[i] * sign[i] <= 0) {
             d[i] = 0;
         }

@@ -15,7 +15,7 @@ public:
 
     decrypt_image(cv::Mat input);
 
-    void decrypt(std::vector<cv::Mat> ref, std::vector<int>& ri_x_g, std::vector<int>& ri_y_g, int num_iterations, float coef, bool opt, int tile_index = -1);
+    void decrypt(std::vector<cv::Mat> ref, std::vector<int>& ri_x_g, std::vector<int>& ri_y_g, int num_iterations, float coef, cv::Mat& out);
 
     void get_mat(cv::Mat& dest);
 

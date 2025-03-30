@@ -42,7 +42,7 @@ decrypt_image::decrypt_image(cv::Mat input) {
     org_size.width = (float)std::stoi(splitText[4]);
 }
 
-void decrypt_image::decrypt(std::vector<cv::Mat> ref, std::vector<int>& ri_x_g, std::vector<int>& ri_y_g, int num_iterations, float coef, bool opt, int tile_index) {
+void decrypt_image::decrypt(std::vector<cv::Mat> ref, std::vector<int>& ri_x_g, std::vector<int>& ri_y_g, int num_iterations, float coef, cv::Mat& out) {
     ri_x = ri_x_g;
     ri_y = ri_y_g;
     //std::vector<cv::Mat> ref = createRefDCT(rows, cols);
@@ -50,11 +50,12 @@ void decrypt_image::decrypt(std::vector<cv::Mat> ref, std::vector<int>& ri_x_g, 
     std::vector<std::thread> CPUProcessing(3);
 
     for (int i = 0; i < 3; i++) {
-        reconstruct_color_chanel(c[i], encrypted_img, i, coef, optimal_values[0], rows, cols, ri_x, ri_y, num_iterations, ref, opt, tile_index, true);
+        reconstruct_color_chanel(c[i], encrypted_img, i, coef, rows, cols, ri_x, ri_y, num_iterations, ref);
     }
 
     cv::merge(c, 3, decrypted_img);
     decrypted_img.convertTo(decrypted_img, CV_8UC3);
+    out = decrypted_img.clone();
 }
 
 void decrypt_image::get_mat(cv::Mat& dest) {
@@ -62,7 +63,7 @@ void decrypt_image::get_mat(cv::Mat& dest) {
 }
 
 cv::Mat decrypt_image::get_mat() {
-    return decrypted_img;// .clone();
+    return decrypted_img.clone();
 }
 
 void decrypt_image::writeDecryptedImageToDisk(std::string output_path, bool remove_noise, bool noise_level) {

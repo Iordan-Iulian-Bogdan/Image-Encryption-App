@@ -50,7 +50,7 @@ inline static void vecset(float* x, const float c, const int n) {
     __m256 vec = _mm256_set1_ps(c);
     int i;
     for (i = 0; i <= n - 8; i += 8) {
-        _mm256_storeu_ps(&x[i], vec);
+        _mm256_store_ps(&x[i], vec);
     }
     for (; i < n; ++i) {
         x[i] = c;
@@ -60,7 +60,7 @@ inline static void vecset(float* x, const float c, const int n) {
 inline static void veccpy(float* y, const float* x, const int n) {
     int i;
     for (i = 0; i <= n - 8; i += 8) {
-        _mm256_storeu_ps(&y[i], _mm256_loadu_ps(&x[i]));
+        _mm256_store_ps(&y[i], _mm256_load_ps(&x[i]));
     }
     for (; i < n; ++i) {
         y[i] = x[i];
@@ -71,7 +71,7 @@ inline static void vecncpy(float* y, const float* x, const int n) {
     int i;
     __m256 neg_one = _mm256_set1_ps(-1.0f);
     for (i = 0; i <= n - 8; i += 8) {
-        _mm256_storeu_ps(&y[i], _mm256_mul_ps(_mm256_loadu_ps(&x[i]), neg_one));
+        _mm256_store_ps(&y[i], _mm256_mul_ps(_mm256_load_ps(&x[i]), neg_one));
     }
     for (; i < n; ++i) {
         y[i] = -x[i];
@@ -82,7 +82,7 @@ inline static void vecadd(float* y, const float* x, const float c, const int n) 
     int i;
     __m256 factor = _mm256_set1_ps(c);
     for (i = 0; i <= n - 8; i += 8) {
-        _mm256_storeu_ps(&y[i], _mm256_fmadd_ps(_mm256_loadu_ps(&x[i]), factor, _mm256_loadu_ps(&y[i])));
+        _mm256_store_ps(&y[i], _mm256_fmadd_ps(_mm256_load_ps(&x[i]), factor, _mm256_load_ps(&y[i])));
     }
     for (; i < n; ++i) {
         y[i] += c * x[i];
@@ -92,7 +92,7 @@ inline static void vecadd(float* y, const float* x, const float c, const int n) 
 inline static void vecdiff(float* z, const float* x, const float* y, const int n) {
     int i;
     for (i = 0; i <= n - 8; i += 8) {
-        _mm256_storeu_ps(&z[i], _mm256_sub_ps(_mm256_loadu_ps(&x[i]), _mm256_loadu_ps(&y[i])));
+        _mm256_store_ps(&z[i], _mm256_sub_ps(_mm256_load_ps(&x[i]), _mm256_load_ps(&y[i])));
     }
     for (; i < n; ++i) {
         z[i] = x[i] - y[i];
@@ -103,7 +103,7 @@ inline static void vecscale(float* y, const float c, const int n) {
     int i;
     __m256 factor = _mm256_set1_ps(c);
     for (i = 0; i <= n - 8; i += 8) {
-        _mm256_storeu_ps(&y[i], _mm256_mul_ps(_mm256_loadu_ps(&y[i]), factor));
+        _mm256_store_ps(&y[i], _mm256_mul_ps(_mm256_load_ps(&y[i]), factor));
     }
     for (; i < n; ++i) {
         y[i] *= c;
@@ -113,7 +113,7 @@ inline static void vecscale(float* y, const float c, const int n) {
 inline static void vecmul(float* y, const float* x, const int n) {
     int i;
     for (i = 0; i <= n - 8; i += 8) {
-        _mm256_storeu_ps(&y[i], _mm256_mul_ps(_mm256_loadu_ps(&x[i]), _mm256_loadu_ps(&y[i])));
+        _mm256_store_ps(&y[i], _mm256_mul_ps(_mm256_load_ps(&x[i]), _mm256_load_ps(&y[i])));
     }
     for (; i < n; ++i) {
         y[i] *= x[i];
@@ -125,12 +125,12 @@ inline static void vecdot(float* s, const float* x, const float* y, const int n)
     int i;
 
     for (i = 0; i <= n - 8; i += 8) {
-        sum = _mm256_add_ps(sum, _mm256_mul_ps(_mm256_loadu_ps(&x[i]), _mm256_loadu_ps(&y[i])));
+        sum = _mm256_add_ps(sum, _mm256_mul_ps(_mm256_load_ps(&x[i]), _mm256_load_ps(&y[i])));
     }
 
     // Horizontal sum of all elements in the vector sum
     float temp[8];
-    _mm256_storeu_ps(temp, sum);
+    _mm256_store_ps(temp, sum);
     *s = temp[0] + temp[1] + temp[2] + temp[3] + temp[4] + temp[5] + temp[6] + temp[7];
 
     // Sum the remaining elements

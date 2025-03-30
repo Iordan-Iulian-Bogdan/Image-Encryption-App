@@ -86,25 +86,62 @@ std::vector<cv::Mat> splitMat(cv::Mat& image, int M, int N)
 
 inline void updateAxb2AndComputeFx(float* x_copy, int* ri_x, int* ri_y,
     float* Axb2_vec, const float* b, int cols, float& fx, int n) {
-    fx = 0.0f;
+    __m256 fx_vec = _mm256_setzero_ps();  // Accumulator for fx
 
-    // Process elements
-    for (int i = 0; i < n; ++i) {
+    // Process 8 elements at a time
+    int i = 0;
+    for (; i <= n - 8; i += 8) {
+        // Gather indices
+        int idx[8];
+        for (int k = 0; k < 8; k++) {
+            idx[k] = ri_x[i + k] * cols + ri_y[i + k];
+        }
+
+        // Load x_copy values using gather
+        __m256 x_val = _mm256_i32gather_ps(x_copy, _mm256_load_si256((__m256i*) & idx[0]), 4);
+
+        // Load b values
+        __m256 b_val = _mm256_load_ps(&b[i]);
+
+        // Compute differences
+        __m256 diff = _mm256_sub_ps(x_val, b_val);
+
+        // Accumulate fx (diff * diff)
+        fx_vec = _mm256_fmadd_ps(diff, diff, fx_vec);
+
+        // Store differences to Axb2_vec
+        alignas(32) float temp[8];
+        _mm256_store_ps(temp, diff);
+        for (int k = 0; k < 8; k++) {
+            Axb2_vec[idx[k]] = temp[k];
+        }
+    }
+
+    // Handle remaining elements
+    float fx_temp = 0.0f;
+    for (; i < n; ++i) {
         int idx = ri_x[i] * cols + ri_y[i];
         float diff = x_copy[idx] - b[i];
-        fx += diff * diff;
+        fx_temp += diff * diff;
         Axb2_vec[idx] = diff;
     }
+
+    // Reduce fx_vec to scalar
+    __m128 hi = _mm256_extractf128_ps(fx_vec, 1);
+    __m128 lo = _mm256_castps256_ps128(fx_vec);
+    __m128 sum = _mm_add_ps(hi, lo);
+    sum = _mm_hadd_ps(sum, sum);
+    sum = _mm_hadd_ps(sum, sum);
+    fx = _mm_cvtss_f32(sum) + fx_temp;
 }
 
-
 inline void eval_g(float* Axb2, float* g, int n) {
-    // Process multiples of 16
-    __m512 scalar = _mm512_set1_ps(2.0f);
+    __m256 scalar = _mm256_set1_ps(2.0f); // Set scalar to 2.0f
     int i = 0;
-    for (; i <= n - 16; i += 16) {
-        __m512 vecData = _mm512_loadu_ps(&Axb2[i]);  // load 16 floats
-        _mm512_storeu_ps(&g[i], _mm512_mul_ps(vecData, scalar));  // store 16 floats
+    // Process multiples of 8 (AVX2 processes 8 floats at a time)
+    for (; i <= n - 8; i += 8) {
+        __m256 vecData = _mm256_load_ps(&Axb2[i]);  // Load 8 floats
+        _mm256_store_ps(&g[i], _mm256_mul_ps(vecData, scalar));  // Multiply and store
     }
 
     // Process remaining elements
@@ -114,13 +151,13 @@ inline void eval_g(float* Axb2, float* g, int n) {
 }
 
 inline void copy_x(float* x_copy, float* x, float* Axb2_vec, int n) {
-    __m512 factor = _mm512_set1_ps(0.0f);
-    // Process multiples of 16
+    __m256 factor = _mm256_set1_ps(0.0f); // Set factor to 0.0f
     int i = 0;
-    for (; i <= n - 16; i += 16) {
-        __m512 vecData = _mm512_loadu_ps(&x[i]);  // load 16 floats from vector
-        _mm512_storeu_ps(&x_copy[i], vecData);  // store 16 floats to array
-        _mm512_storeu_ps(&Axb2_vec[i], factor);
+    // Process multiples of 8
+    for (; i <= n - 8; i += 8) {
+        __m256 vecData = _mm256_load_ps(&x[i]);  // Load 8 floats from input
+        _mm256_store_ps(&x_copy[i], vecData);  // Copy to x_copy
+        _mm256_store_ps(&Axb2_vec[i], factor); // Set Axb2_vec to 0
     }
 
     // Process remaining elements
@@ -188,7 +225,7 @@ std::vector<cv::Mat> createRefDCT(int rows, int cols) {
     return c;
 }
 
-void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, int k, float param_c, float optimal_value, int rows, int cols, std::vector<int>& ri_x, std::vector<int>& ri_y, int iterations, std::vector<cv::Mat> ref, bool opt, int tile_index, bool copy_result) {
+void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, int k, float param_c, int rows, int cols, std::vector<int>& ri_x, std::vector<int>& ri_y, int iterations, std::vector<cv::Mat> ref) {
 
     int n = rows * cols; // size of solution (size of vectorized image)
     float fx;
@@ -369,7 +406,6 @@ void splitImageIntoTiles(const cv::Mat& inputImage,
     coordinates.resize(tileCountN, std::vector<TileCoord>(tileCountN));
 
     // Split image into tiles
-#pragma omp parallel for num_threads(8) schedule(dynamic)
     for (int i = 0; i < tileCountN; i++) {
         for (int j = 0; j < tileCountN; j++) {
             // Calculate tile position
@@ -427,7 +463,6 @@ cv::Mat blendTilesWithImage(const std::vector<std::vector<cv::Mat>>& tiles,
     alpha = std::max(0.0f, std::min(1.0f, alpha));  // Clamp between 0 and 1
 
     // Blend each tile with the target image
-#pragma omp parallel for num_threads(8) schedule(dynamic)
     for (int i = 0; i < tileCountN; i++) {
         for (int j = 0; j < tileCountN; j++) {
             if (!tiles[i][j].empty()) {

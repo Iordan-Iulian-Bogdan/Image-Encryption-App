@@ -174,6 +174,7 @@
       <OptimizeForWindowsApplication>true</OptimizeForWindowsApplication>
       <GenerateAlternateCodePaths>CORE512</GenerateAlternateCodePaths>
       <UseProcessorExtensions>CORE512</UseProcessorExtensions>
+      <AdditionalOptions>-fopenmp %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -185,6 +186,7 @@
       <DelayLoadDLLs>
       </DelayLoadDLLs>
       <LinkTimeCodeGeneration>UseFastLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <AdditionalOptions>-fopenmp %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

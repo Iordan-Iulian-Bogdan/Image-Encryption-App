@@ -26,15 +26,8 @@ void process_1(int num_threads, int pass, std::vector<std::vector<cv::Mat>>& mat
             copied[i] = ref[i].clone();
         }
 
-        decrypt_image* dimgs = new decrypt_image;
-        *dimgs = decrypt_image(mats_in[i][j]);
-        dimgs->decrypt(copied, indices[i][j].ri_x_g, indices[i][j].ri_y_g, iterations, 0.05, false);
-        dimgs->get_mat(mats_out[i][j]);
-        delete(dimgs);
-
-        mats_in[i][j].deallocate();
-        indices[i][j].ri_x_g.resize(0);
-        indices[i][j].ri_y_g.resize(0);
+        decrypt_image dimgs = decrypt_image(mats_in[i][j]);
+        dimgs.decrypt(copied, indices[i][j].ri_x_g, indices[i][j].ri_y_g, iterations, 0.05, mats_out[i][j]);
     }
 
 }
@@ -48,7 +41,7 @@ void display_output(std::string windowName, cv::Mat& temp, std::vector<std::vect
     }
 }
 
-void decrypt_image_tiled(cv::Mat encrypted_img_g, int tiles, int overlap, int iterations, int nun_threads) {
+void decrypt_image_tiled(cv::Mat& encrypted_img_g, int tiles, int overlap, int iterations, int nun_threads, std::string location) {
     cv::Mat sampled_mat;
     decrypt_image dimgs = decrypt_image(encrypted_img_g);
     cv::Size org_size = dimgs.get_org_size();
@@ -120,9 +113,10 @@ void decrypt_image_tiled(cv::Mat encrypted_img_g, int tiles, int overlap, int it
 
     g_dsp = false;
     CPU_display_output.join();
+    reconstructed = reconstructImage(reconfigured_cropped_out, coordinates);
     cv::Mat blended = blendTilesWithImage(reconfigured_cropped_out, coordinates, reconstructed, 0.5f);
     cv::resize(blended, blended, org_size);
-    cv::imwrite("blended.png", blended);
+    cv::imwrite(location, blended);
 }
 
 cv::Mat encrypt_image_tiled(cv::Mat input_image, float compression_ratio = 0.5f) {
@@ -132,7 +126,7 @@ cv::Mat encrypt_image_tiled(cv::Mat input_image, float compression_ratio = 0.5f)
     return encrypt_img.get_mat();
 }
 
-int main(int argc, char* argv)
+int main(int argc, char** argv)
 {
     
     std::vector<const char*> inputs(4);
@@ -140,13 +134,11 @@ int main(int argc, char* argv)
     inputs[1] = "IMG_1297.png";
     inputs[2] = "IMG_0007.png";
     inputs[3] = "IMG_9321.png";
-
     //cv::Mat img = cv::imread(inputs[0], cv::IMREAD_COLOR);
     //cv::Mat encrypted_img_g = encrypt_image_tiled(img, 0.33f);
     //cv::imwrite("encrypted_img_g.png", encrypted_img_g);
-
     cv::Mat encrypted_img_g = cv::imread("encrypted_img_g.png", cv::IMREAD_COLOR);
-    decrypt_image_tiled(encrypted_img_g, 24, 48, 25, 24);
-
+    decrypt_image_tiled(encrypted_img_g, 24, 48, 25, 24, "blended.png");
+    
     return 0;
 }

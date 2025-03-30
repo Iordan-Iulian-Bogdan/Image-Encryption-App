@@ -49,7 +49,7 @@ int progress(
     int ls
 );
 std::vector<cv::Mat> createRefDCT(int rows, int cols);
-void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, int k, float param_c, float optimal_value, int rows, int cols, std::vector<int>& ri_x, std::vector<int>& ri_y, int iterations, std::vector<cv::Mat> ref, bool opt, int tile_index, bool copy_result);
+void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, int k, float param_c, int rows, int cols, std::vector<int>& ri_x, std::vector<int>& ri_y, int iterations, std::vector<cv::Mat> ref);
 std::vector<std::string> splitString(const std::string& str, char delimiter);
 std::string removeCharacter(const std::string& str, char ch);
 void storeStringInColorMat(const std::string& text, cv::Mat& colorMat);
