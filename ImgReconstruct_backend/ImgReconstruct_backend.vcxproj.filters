@@ -21,6 +21,7 @@
     <ClCompile Include="lbfgs.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+<<<<<<< HEAD
     <ClCompile Include="CS_encryption.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -33,12 +34,30 @@
     <ClCompile Include="image_encryption.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+=======
+    <ClCompile Include="helper_functions.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="image_encryption.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="image_decryption.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CS_encryption.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+>>>>>>> 5e6d2576013e1e964ea125802c9423b4670daf44
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="arithmetic_ansi.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+<<<<<<< HEAD
     <ClInclude Include="CS_encryption.hpp">
+=======
+    <ClInclude Include="lbfgs.hpp">
+>>>>>>> 5e6d2576013e1e964ea125802c9423b4670daf44
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="helper_functions.hpp">
@@ -50,7 +69,11 @@
     <ClInclude Include="image_encryption.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+<<<<<<< HEAD
     <ClInclude Include="lbfgs.hpp">
+=======
+    <ClInclude Include="CS_encryption.hpp">
+>>>>>>> 5e6d2576013e1e964ea125802c9423b4670daf44
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
