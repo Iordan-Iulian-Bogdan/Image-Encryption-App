@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <math.h>
 
-#include "lbfgs.h"
+#include "lbfgs.hpp"
 
 #ifdef  _MSC_VER
 #define inline  __inline
@@ -1398,30 +1398,70 @@ static void owlqn_pseudo_gradient(
     const int end
 )
 {
-    int i;
-
-    /* Compute the negative of gradients. */
-    for (i = 0; i < start; ++i) {
+    // Process initial section (i < start)
+    int i = 0;
+    for (; i < start && i <= n - 8; i += 8) {
+        __m256 g_vec = _mm256_load_ps(&g[i]);
+        _mm256_store_ps(&pg[i], g_vec);
+    }
+    for (; i < start; ++i) {
         pg[i] = g[i];
     }
 
-    /* Compute the psuedo-gradients. */
-    for (i = start; i < end; ++i) {
+    // Main section with pseudo-gradient computation (start <= i < end)
+    __m256 c_vec = _mm256_set1_ps(c);
+    __m256 zero_vec = _mm256_setzero_ps();
+    __m256 neg_c_vec = _mm256_set1_ps(-c);
+
+    for (; i <= end - 8; i += 8) {
+        __m256 x_vec = _mm256_load_ps(&x[i]);
+        __m256 g_vec = _mm256_load_ps(&g[i]);
+
+        // Masks for conditions
+        __m256 mask_lt_zero = _mm256_cmp_ps(x_vec, zero_vec, _CMP_LT_OQ);    // x < 0
+        __m256 mask_gt_zero = _mm256_cmp_ps(x_vec, zero_vec, _CMP_GT_OQ);    // x > 0
+        __m256 mask_eq_zero = _mm256_cmp_ps(x_vec, zero_vec, _CMP_EQ_OQ);    // x == 0
+        __m256 mask_g_lt_negc = _mm256_cmp_ps(g_vec, neg_c_vec, _CMP_LT_OQ); // g < -c
+        __m256 mask_g_gt_c = _mm256_cmp_ps(g_vec, c_vec, _CMP_GT_OQ);        // g > c
+
+        // Compute results for different cases
+        __m256 result_lt_zero = _mm256_sub_ps(g_vec, c_vec);  // g - c
+        __m256 result_gt_zero = _mm256_add_ps(g_vec, c_vec);  // g + c
+        __m256 result_right = _mm256_add_ps(g_vec, c_vec);    // g + c (right partial)
+        __m256 result_left = _mm256_sub_ps(g_vec, c_vec);     // g - c (left partial)
+        __m256 result_zero = zero_vec;                        // 0
+
+        // Combine results based on conditions
+        __m256 result = result_zero;
+
+        // When x < 0
+        result = _mm256_blendv_ps(result, result_lt_zero, mask_lt_zero);
+
+        // When x > 0
+        result = _mm256_blendv_ps(result, result_gt_zero, mask_gt_zero);
+
+        // When x == 0, we need to check g conditions
+        __m256 temp_result = result_zero;
+        temp_result = _mm256_blendv_ps(temp_result, result_right, mask_g_lt_negc);
+        temp_result = _mm256_blendv_ps(temp_result, result_left, mask_g_gt_c);
+        result = _mm256_blendv_ps(result, temp_result, mask_eq_zero);
+
+        _mm256_store_ps(&pg[i], result);
+    }
+
+    // Handle remaining elements in main section
+    for (; i < end; ++i) {
         if (x[i] < 0.) {
-            /* Differentiable. */
             pg[i] = g[i] - c;
         }
         else if (0. < x[i]) {
-            /* Differentiable. */
             pg[i] = g[i] + c;
         }
         else {
             if (g[i] < -c) {
-                /* Take the right partial derivative. */
                 pg[i] = g[i] + c;
             }
             else if (c < g[i]) {
-                /* Take the left partial derivative. */
                 pg[i] = g[i] - c;
             }
             else {
@@ -1430,7 +1470,12 @@ static void owlqn_pseudo_gradient(
         }
     }
 
-    for (i = end; i < n; ++i) {
+    // Process final section (i >= end)
+    for (; i <= n - 8; i += 8) {
+        __m256 g_vec = _mm256_load_ps(&g[i]);
+        _mm256_store_ps(&pg[i], g_vec);
+    }
+    for (; i < n; ++i) {
         pg[i] = g[i];
     }
 }
@@ -1442,9 +1487,31 @@ static void owlqn_project(
     const int end
 )
 {
-    int i;
+    int i = start;
 
-    for (i = start; i < end; ++i) {
+    // Process 8 elements at a time
+    __m256 zero_vec = _mm256_setzero_ps();
+
+    for (; i <= end - 8; i += 8) {
+        // Load 8 elements from d and sign
+        __m256 d_vec = _mm256_load_ps(&d[i]);
+        __m256 sign_vec = _mm256_load_ps(&sign[i]);
+
+        // Compute d * sign
+        __m256 prod = _mm256_mul_ps(d_vec, sign_vec);
+
+        // Create mask where d * sign <= 0
+        __m256 mask = _mm256_cmp_ps(prod, zero_vec, _CMP_LE_OQ);
+
+        // Set elements to 0 where condition is true
+        d_vec = _mm256_blendv_ps(d_vec, zero_vec, mask);
+
+        // Store result back to d
+        _mm256_store_ps(&d[i], d_vec);
+    }
+
+    // Handle remaining elements
+    for (; i < end; ++i) {
         if (d[i] * sign[i] <= 0) {
             d[i] = 0;
         }
