@@ -17,6 +17,8 @@ struct indices {
     std::vector<int> ri_x_g, ri_y_g;
 };
 
+std::vector<unsigned long> generate_seeds(std::string input);
+
 int nextClosestDivisible(int x, int y);
 
 cv::Mat reconstructImage(const std::vector<std::vector<cv::Mat>>& tiles,

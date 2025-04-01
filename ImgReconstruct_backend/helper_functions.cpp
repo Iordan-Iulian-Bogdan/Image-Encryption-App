@@ -1,5 +1,26 @@
 #include "helper_functions.hpp"
 
+std::vector<unsigned long> generate_seeds(std::string input) {
+
+    std::vector<unsigned long> seeds;
+
+    for (int i = 0; i < input.size(); i++) {
+        std::string aux = input[0] + input.substr(i, i);
+        std::hash<std::string> hasher;
+        unsigned long hashResult = hasher(aux);
+        seeds.push_back(hashResult);
+    }
+
+    std::hash<unsigned long> hasher;
+    for (int i = 0; i < seeds.size() - 1; i++) {
+        for (int j = 0; j < seeds.size(); j++) {
+            seeds[i] = hasher(seeds[i] ^ seeds[j]);
+        }
+    }
+
+    return seeds;
+}
+
 int nextClosestDivisible(int x, int y) {
     // Ensure y is not zero to avoid division by zero error
     if (y == 0) {
@@ -55,7 +76,7 @@ cv::Mat reconstructImage(const std::vector<std::vector<cv::Mat>>& tiles,
 // Function to update the image
 void updateImage(const std::string& windowName, const cv::Mat& newImage) {
     cv::Mat aux = newImage.clone();
-    cv::resize(aux, aux, cv::Size(newImage.cols / 3, newImage.rows / 3));
+    cv::resize(aux, aux, cv::Size(newImage.cols / 4, newImage.rows / 4));
     cv::imshow(windowName, aux);
 }
 
@@ -237,6 +258,10 @@ void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, int k, float p
     param.max_iterations = iterations;
     int lbfgs_ret;
     std::vector<float> b;
+
+    // reserving space to avoid realocations
+    b.reserve(measurement.total());
+
     //auto update_progress = progress;
     lbfgs_progress_t update_progress = NULL;
     eval_data data;

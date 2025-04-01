@@ -79,14 +79,14 @@ void decrypt_image::writeDecryptedImageToDisk(std::string output_path, bool remo
 }
 
 
-cv::Mat decrypt_image::get_sampled_mat(int seed, cv::Mat& sampled_mat, cv::Mat& masked_mat) {
+cv::Mat decrypt_image::get_sampled_mat(std::string password, cv::Mat& sampled_mat, cv::Mat& masked_mat) {
     sampled_mat = cv::Mat::zeros(rows, cols, CV_8UC3);
     masked_mat = cv::Mat::zeros(rows, cols, CV_8UC3);
     ri_x.resize(m);
     ri_y.resize(m);
-    returnRandomIndices(ri_x, ri_y, rows, cols, m, seed);
+    returnRandomIndices(ri_x, ri_y, rows, cols, m, password);
 
-    for (int i = 11; i < ri_x.size() + 11; i = i + 4) {
+    for (int i = 11; i < ri_x.size() + 11 - 8; i = i + 8) {
         sampled_mat.at<cv::Vec3b>(ri_x[i - 11], ri_y[i - 11]) = encrypted_img.at<cv::Vec3b>(i);
         masked_mat.at<cv::Vec3b>(ri_x[i - 11], ri_y[i - 11]) = cv::Vec3b(1, 1, 1);
 
@@ -126,14 +126,14 @@ cv::Mat decrypt_image::get_sampled_mask(int seed) {
     return sampled_mask.clone();
 }
 
-void decrypt_image::get_sampled_mask_mats(int seed, cv::Mat& sampled_mat, cv::Mat& sampled_mask) {
+void decrypt_image::get_sampled_mask_mats(std::string password, cv::Mat& sampled_mat, cv::Mat& sampled_mask) {
     sampled_mask = cv::Mat::zeros(rows, cols, CV_8UC3);
     sampled_mat = cv::Mat::zeros(rows, cols, CV_8UC3);
     ri_x.resize(m);
     ri_y.resize(m);
-    returnRandomIndices(ri_x, ri_y, rows, cols, m, seed);
+    returnRandomIndices(ri_x, ri_y, rows, cols, m, password);
 
-    for (int i = 11, j = 0; i < ri_x.size() + 11, j < ri_x.size(); i++, j++) {
+    for (int i = 11, j = 0; i < ri_x.size() + 11 || j < ri_x.size(); i++, j++) {
         sampled_mat.at<cv::Vec3b>(ri_x[i - 11], ri_y[i - 11]) = encrypted_img.at<cv::Vec3b>(i);
         sampled_mask.at<cv::Vec3b>(ri_x[j], ri_y[j]) = cv::Vec3b(1, 1, 1);
     }

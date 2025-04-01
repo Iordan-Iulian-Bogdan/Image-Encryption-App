@@ -23,7 +23,7 @@ public:
 
     cv::Mat get_sampled_mask();
 
-    void encrypt(float pixel_p = 0.3, int seed = 1);
+    void encrypt(float pixel_p = 0.3, std::string password = "1");
 
     void encrypt(std::vector<int> ri_x_g, std::vector<int> ri_y_g);
 

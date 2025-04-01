@@ -24,11 +24,11 @@ public:
     void writeDecryptedImageToDisk(std::string output_path, bool remove_noise = false, bool noise_level = 3);
 
 
-    cv::Mat get_sampled_mat(int seed, cv::Mat& sampled_mat, cv::Mat& masked_mat);
+    cv::Mat get_sampled_mat(std::string password, cv::Mat& sampled_mat, cv::Mat& masked_mat);
 
     cv::Mat get_sampled_mask(int seed);
 
-    void get_sampled_mask_mats(int seed, cv::Mat& sampled_mat, cv::Mat& sampled_mask);
+    void get_sampled_mask_mats(std::string password, cv::Mat& sampled_mat, cv::Mat& sampled_mask);
 
     cv::Size get_org_size();
 };

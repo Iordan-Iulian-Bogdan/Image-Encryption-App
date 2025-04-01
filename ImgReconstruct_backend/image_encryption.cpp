@@ -52,7 +52,7 @@ cv::Mat encrypt_image::get_sampled_mask() {
     return sampled_mat.clone();
 }
 
-void encrypt_image::encrypt(float pixel_p, int seed) {
+void encrypt_image::encrypt(float pixel_p, std::string seed) {
     bm = pixel_p;
     m = rows * cols * bm;
     int n = rows * cols;
