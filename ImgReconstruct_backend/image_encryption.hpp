@@ -6,12 +6,12 @@
 class encrypt_image : CSencryption
 {
 private:
-    float bm;
+    float bm = 0.0f;
 
 public:
-    encrypt_image(std::string input_path, bool remove_noise = false, int noise_level = 3);
+    encrypt_image(std::string input_path);
 
-    encrypt_image(cv::Mat input, bool remove_noise = false, int noise_level = 3);
+    encrypt_image(const cv::Mat& input);
 
     encrypt_image() {}
 
@@ -19,15 +19,11 @@ public:
 
     cv::Mat get_mat();
 
-    cv::Mat get_sampled_mat();
+    void encrypt(const float& pixel_p, const std::string& password);
 
-    cv::Mat get_sampled_mask();
+    void encrypt(const std::vector<int>& ri_x_g, const std::vector<int>& ri_y_g);
 
-    void encrypt(float pixel_p = 0.3, std::string password = "1");
-
-    void encrypt(std::vector<int> ri_x_g, std::vector<int> ri_y_g);
-
-    void writeEncryptedImageToDisk(std::string output_path);
+    void writeEncryptedImageToDisk(const std::string& output_path);
 
     cv::Size get_size(); 
 

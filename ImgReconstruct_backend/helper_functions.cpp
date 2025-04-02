@@ -1,6 +1,6 @@
 #include "helper_functions.hpp"
 
-std::vector<unsigned long> generate_seeds(std::string input) {
+std::vector<unsigned long> generate_seeds(const std::string input) {
 
     std::vector<unsigned long> seeds;
 
@@ -21,7 +21,7 @@ std::vector<unsigned long> generate_seeds(std::string input) {
     return seeds;
 }
 
-int nextClosestDivisible(int x, int y) {
+int nextClosestDivisible(const int& x, const int& y) {
     // Ensure y is not zero to avoid division by zero error
     if (y == 0) {
         throw std::invalid_argument("y must not be zero");
@@ -230,7 +230,7 @@ int progress(
     return 0;
 }
 
-std::vector<cv::Mat> createRefDCT(int rows, int cols) {
+std::vector<cv::Mat> createRefDCT(const int& rows, const int& cols) {
     cv::Mat ref = cv::imread("ref.png", cv::IMREAD_COLOR);
     cv::resize(ref, ref, cv::Size(rows, cols));
     std::vector<cv::Mat> c;
@@ -240,13 +240,13 @@ std::vector<cv::Mat> createRefDCT(int rows, int cols) {
         c[i].convertTo(c[i], CV_32F);
         c[i] = c[i] / 255.0f;
         cv::dct(c[i], c[i], 0);
-        c[i] = c[i] / 10.0;
+        c[i] = c[i] / 10.0f;
     }
 
     return c;
 }
 
-void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, int k, float param_c, int rows, int cols, std::vector<int>& ri_x, std::vector<int>& ri_y, int iterations, std::vector<cv::Mat> ref) {
+void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, const int& k, const float& param_c, const int& rows, const int& cols, std::vector<int>& ri_x, std::vector<int>& ri_y, const int& iterations, std::vector<cv::Mat> ref) {
 
     int n = rows * cols; // size of solution (size of vectorized image)
     float fx;
@@ -300,7 +300,7 @@ void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, int k, float p
     out = AtAxb2;// .clone();
 }
 
-std::vector<std::string> splitString(const std::string& str, char delimiter) {
+std::vector<std::string> splitString(const std::string& str, const char& delimiter) {
     std::vector<std::string> result;
     std::string temp;
     for (char c : str) {
@@ -321,7 +321,7 @@ std::vector<std::string> splitString(const std::string& str, char delimiter) {
     return result;
 }
 
-std::string removeCharacter(const std::string& str, char ch) {
+std::string removeCharacter(const std::string& str, const char& ch) {
     std::string result;
     for (char c : str) {
         if (c != ch) {
@@ -362,7 +362,7 @@ std::string retrieveStringFromColorMat(const cv::Mat& colorMat) {
 }
 
 
-std::vector<cv::Mat> splitImageIntoTiles(const cv::Mat& image, int tile_width, int tile_height, int rows, int cols) {
+std::vector<cv::Mat> splitImageIntoTiles(const cv::Mat& image, const int& tile_width, const int& tile_height, const int& rows, const int& cols) {
     std::vector<cv::Mat> tiles;
 
     // Iterate over each tile position and extract the tile from the image
@@ -412,8 +412,8 @@ std::vector<std::string> spiralOrder(std::vector<std::vector<std::string>>& matr
 void splitImageIntoTiles(const cv::Mat& inputImage,
     std::vector<std::vector<cv::Mat>>& tiles,
     std::vector<std::vector<TileCoord>>& coordinates,
-    int tileCountN,
-    int overlap) {
+    const int& tileCountN,
+    const int& overlap) {
     // Input validation
     if (inputImage.empty() || tileCountN <= 0 || overlap < 0) {
         return;
@@ -513,7 +513,7 @@ cv::Mat blendTilesWithImage(const std::vector<std::vector<cv::Mat>>& tiles,
 
                 // Perform alpha blending
                 // outputROI = alpha * tile + (1 - alpha) * outputROI
-                addWeighted(tiles[i][j], alpha, outputROI, 1.0 - alpha, 0.0, outputROI);
+                addWeighted(tiles[i][j], alpha, outputROI, 1.0f - alpha, 0.0f, outputROI);
             }
         }
     }

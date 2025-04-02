@@ -2,7 +2,7 @@
 #include "image_encryption.hpp"
 #include "image_decryption.hpp"
 
-void process_1(int num_threads, int pass, std::vector<std::vector<cv::Mat>>& mats_in, std::vector<std::vector<indices>> indices,
+static void decrypt_tiles(int num_threads, std::vector<std::vector<cv::Mat>>& mats_in, std::vector<std::vector<indices>> indices,
     std::vector<std::vector<cv::Mat>>& mats_out, std::vector<std::string> processing_order, int iterations, cv::Size tile_size, float coef) {
     
     const std::vector<cv::Mat> ref = createRefDCT(tile_size.height, tile_size.width);
@@ -25,7 +25,7 @@ void process_1(int num_threads, int pass, std::vector<std::vector<cv::Mat>>& mat
 
 }
 
-void decrypt_image_tiled(cv::Mat& encrypted_img_g, int tiles, int overlap, int iterations, int nun_threads, float coef, std::string location, std::string password) {
+static void decrypt_image_tiled(const cv::Mat& encrypted_img_g, const int& tiles, const int& overlap, const int& iterations, const int& nun_threads, const float& coef, std::string location, const std::string& password) {
     cv::Mat sampled_mat;
     cv::Mat masked_mat;
     decrypt_image dimgs = decrypt_image(encrypted_img_g);
@@ -39,22 +39,14 @@ void decrypt_image_tiled(cv::Mat& encrypted_img_g, int tiles, int overlap, int i
     int N_reconfigured = tiles;
     reconfigured_cropped_out.resize(N_reconfigured, std::vector<cv::Mat>(N_reconfigured));
     std::vector<std::vector<cv::Mat>> reconfigured_cropped_mats_in;
-    //std::vector<std::vector<cv::Mat>> reconfigured_cropped_masks_in;
 
     std::vector<std::vector<indices>> indices_reconfigured(N_reconfigured, std::vector<indices>(N_reconfigured));
     std::vector<std::vector<TileCoord>> coordinates;
 
     splitImageIntoTiles(sampled_mat, reconfigured_cropped_mats_in, coordinates, N_reconfigured, overlap);
-    //splitImageIntoTiles(masked_mat, reconfigured_cropped_masks_in, coordinates, N_reconfigured, overlap);
 
-    std::vector<int> passwords;
-    sampled_mat.deallocate();
+
     std::vector<std::vector<std::string>> matrix(N_reconfigured, std::vector<std::string>(N_reconfigured));
-    passwords.resize(N_reconfigured * N_reconfigured);
-
-    for (int i = 0; i < N_reconfigured * N_reconfigured; i++) {
-        passwords[i] = i;
-    }
 
     int k = 0;
     for (int i = 0; i < N_reconfigured; i++) {
@@ -63,7 +55,7 @@ void decrypt_image_tiled(cv::Mat& encrypted_img_g, int tiles, int overlap, int i
         }
     }
 
-    std::vector<std::string> result = spiralOrder(matrix);
+    const std::vector<std::string> result = spiralOrder(matrix);
     cv::Size tile_size;
     int estimated_number_of_samples = 0;
 
@@ -93,7 +85,7 @@ void decrypt_image_tiled(cv::Mat& encrypted_img_g, int tiles, int overlap, int i
             estimated_number_of_samples = ri_x_g.size();
 
             reconfigured_cropped_out[i][j] = cv::Mat::zeros(reconfigured_cropped_mats_in[i][j].rows, reconfigured_cropped_mats_in[i][j].cols, CV_8UC3);
-            encrypt_image img(reconfigured_cropped_mats_in[i][j], false);
+            encrypt_image img(reconfigured_cropped_mats_in[i][j]);
 
             indices_reconfigured[i][j] = { ri_x_g, ri_y_g };
             img.encrypt(ri_x_g, ri_y_g);
@@ -107,28 +99,29 @@ void decrypt_image_tiled(cv::Mat& encrypted_img_g, int tiles, int overlap, int i
     display disp;
     disp.display_image(windowName, reconstructed, coordinates, reconfigured_cropped_out);
 
-    std::thread CPUProcessing1;
-    CPUProcessing1 = std::thread(process_1, nun_threads, 1, std::ref(reconfigured_cropped_mats_in), std::ref(indices_reconfigured),
+    std::thread decrypt_tiles_thread;
+    decrypt_tiles_thread = std::thread(decrypt_tiles, nun_threads, std::ref(reconfigured_cropped_mats_in), std::ref(indices_reconfigured),
         std::ref(reconfigured_cropped_out), std::ref(result), iterations, tile_size, coef);
-    CPUProcessing1.join();
+    decrypt_tiles_thread.join();
 
     disp.stop_display();
+
     reconstructed = reconstructImage(reconfigured_cropped_out, coordinates);
     cv::Mat blended = blendTilesWithImage(reconfigured_cropped_out, coordinates, reconstructed, 0.5f);
     cv::resize(blended, blended, org_size);
     cv::imwrite(location, blended);
 }
 
-cv::Mat encrypt_image_tiled(cv::Mat input_image, float compression_ratio = 0.5f, std::string password = "1") {
+static cv::Mat encrypt_image_tiled(const cv::Mat& input_image, const float& compression_ratio, const std::string& password) {
 
-    encrypt_image encrypt_img(input_image, false);
+    encrypt_image encrypt_img(input_image);
     encrypt_img.encrypt(compression_ratio, password);
     return encrypt_img.get_mat();
 }
 
 int main(int argc, char** argv)
 {
-    std::string password = "5v48d254h33432";
+    const std::string password = "5v48d254h33432";
 
     std::vector<const char*> inputs(4);
     inputs[0] = "IMG_3690.png";
@@ -139,7 +132,7 @@ int main(int argc, char** argv)
     //cv::Mat encrypted_img_g = encrypt_image_tiled(img, 0.5f, password);
     //cv::imwrite("encrypted_img_g.png", encrypted_img_g);
     cv::Mat encrypted_img_g = cv::imread("encrypted_img_g.png", cv::IMREAD_COLOR);
-    decrypt_image_tiled(encrypted_img_g, 24, 48, 20, 24, 0.035, "blended.png", "5v48d254h33432");
+    decrypt_image_tiled(encrypted_img_g, 24, 48, 20, 24, 0.035f, "decrypted_image.png", password);
     
     return 0;
 }

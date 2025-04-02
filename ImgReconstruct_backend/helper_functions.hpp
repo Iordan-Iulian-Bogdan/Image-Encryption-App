@@ -17,9 +17,9 @@ struct indices {
     std::vector<int> ri_x_g, ri_y_g;
 };
 
-std::vector<unsigned long> generate_seeds(std::string input);
+std::vector<unsigned long> generate_seeds(const std::string input);
 
-int nextClosestDivisible(int x, int y);
+int nextClosestDivisible(const int& x, const int& y);
 
 cv::Mat reconstructImage(const std::vector<std::vector<cv::Mat>>& tiles,
     const std::vector<std::vector<TileCoord>>& coordinates);
@@ -50,29 +50,29 @@ int progress(
     int k,
     int ls
 );
-std::vector<cv::Mat> createRefDCT(int rows, int cols);
-void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, int k, float param_c, int rows, int cols, std::vector<int>& ri_x, std::vector<int>& ri_y, int iterations, std::vector<cv::Mat> ref);
-std::vector<std::string> splitString(const std::string& str, char delimiter);
-std::string removeCharacter(const std::string& str, char ch);
+std::vector<cv::Mat> createRefDCT(const int& rows, const int& cols);
+void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, const int& k, const float& param_c, const int& rows, const int& cols, std::vector<int>& ri_x, std::vector<int>& ri_y, const int& iterations, std::vector<cv::Mat> ref);
+std::vector<std::string> splitString(const std::string& str, const char& delimiter);
+std::string removeCharacter(const std::string& str, const char& ch);
 void storeStringInColorMat(const std::string& text, cv::Mat& colorMat);
 std::string retrieveStringFromColorMat(const cv::Mat& colorMat);
-std::vector<cv::Mat> splitImageIntoTiles(const cv::Mat& image, int tile_width, int tile_height, int rows, int cols);
+std::vector<cv::Mat> splitImageIntoTiles(const cv::Mat& image, const int& tile_width, const int& tile_height, const int& rows, const int& cols);
 std::vector<std::string> spiralOrder(std::vector<std::vector<std::string>>& matrix);
 void splitImageIntoTiles(const cv::Mat& inputImage,
     std::vector<std::vector<cv::Mat>>& tiles,
     std::vector<std::vector<TileCoord>>& coordinates,
-    int tileCountN,
-    int overlap);
+    const int& tileCountN,
+    const int& overlap);
 cv::Mat blendTilesWithImage(const std::vector<std::vector<cv::Mat>>& tiles,
     const std::vector<std::vector<TileCoord>>& coordinates,
     const cv::Mat& targetImage,
     float alpha);
 
 struct display {
-    std::thread CPU_display_output;
+    std::thread display_output_thread;
     bool g_dsp = true;
 
-    void display_output(std::string windowName, cv::Mat& temp, std::vector<std::vector<TileCoord>>& coordinates, std::vector<std::vector<cv::Mat>>& reconfigured_cropped_out) {
+    void display_output(std::string windowName, cv::Mat& temp, const std::vector<std::vector<TileCoord>>& coordinates, const std::vector<std::vector<cv::Mat>>& reconfigured_cropped_out) {
         while (g_dsp) {
             cv::waitKey(33);
             temp = reconstructImage(reconfigured_cropped_out, coordinates);
@@ -81,12 +81,12 @@ struct display {
         }
     }
 
-    void display_image(std::string windowName, cv::Mat& reconstructed, std::vector<std::vector<TileCoord>>& coordinates, std::vector<std::vector<cv::Mat>>& reconfigured_cropped_out) {
-        CPU_display_output = std::thread(&display::display_output, this, windowName, std::ref(reconstructed), std::ref(coordinates), std::ref(reconfigured_cropped_out));
+    void display_image(const std::string& windowName, cv::Mat& reconstructed, const std::vector<std::vector<TileCoord>>& coordinates, const std::vector<std::vector<cv::Mat>>& reconfigured_cropped_out) {
+        display_output_thread = std::thread(&display::display_output, this, windowName, std::ref(reconstructed), std::ref(coordinates), std::ref(reconfigured_cropped_out));
     }
 
     void stop_display() {
         g_dsp = false;
-        CPU_display_output.join();
+        display_output_thread.join();
     }
 };

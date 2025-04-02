@@ -205,9 +205,6 @@
     <ClInclude Include="image_encryption.hpp" />
     <ClInclude Include="lbfgs.hpp" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="clblast.dll" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
