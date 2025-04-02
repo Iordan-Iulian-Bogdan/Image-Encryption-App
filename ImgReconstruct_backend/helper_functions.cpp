@@ -105,14 +105,13 @@ std::vector<cv::Mat> splitMat(cv::Mat& image, int M, int N)
     return result;
 }
 
-inline void updateAxb2AndComputeFx(float* x_copy, int* ri_x, int* ri_y,
+inline void updateAxb2AndComputeFx(float* x_copy, const int* ri_x, const int* ri_y,
     float* Axb2_vec, const float* b, int cols, float& fx, int n) {
     __m256 fx_vec = _mm256_setzero_ps();  // Accumulator for fx
 
-    // Process 8 elements at a time
     int i = 0;
     for (; i <= n - 8; i += 8) {
-        // Gather indices
+        // Gather indices (aka coordinates of sampled pixels)
         int idx[8];
         for (int k = 0; k < 8; k++) {
             idx[k] = ri_x[i + k] * cols + ri_y[i + k];
@@ -121,7 +120,7 @@ inline void updateAxb2AndComputeFx(float* x_copy, int* ri_x, int* ri_y,
         // Load x_copy values using gather
         __m256 x_val = _mm256_i32gather_ps(x_copy, _mm256_load_si256((__m256i*) & idx[0]), 4);
 
-        // Load b values
+        // Load b values (measurment aka sampled tile)
         __m256 b_val = _mm256_load_ps(&b[i]);
 
         // Compute differences
@@ -159,9 +158,9 @@ inline void updateAxb2AndComputeFx(float* x_copy, int* ri_x, int* ri_y,
 inline void eval_g(float* Axb2, float* g, int n) {
     __m256 scalar = _mm256_set1_ps(2.0f); // Set scalar to 2.0f
     int i = 0;
-    // Process multiples of 8 (AVX2 processes 8 floats at a time)
+
     for (; i <= n - 8; i += 8) {
-        __m256 vecData = _mm256_load_ps(&Axb2[i]);  // Load 8 floats
+        __m256 vecData = _mm256_load_ps(&Axb2[i]); 
         _mm256_store_ps(&g[i], _mm256_mul_ps(vecData, scalar));  // Multiply and store
     }
 
@@ -172,11 +171,11 @@ inline void eval_g(float* Axb2, float* g, int n) {
 }
 
 inline void copy_x(float* x_copy, float* x, float* Axb2_vec, int n) {
-    __m256 factor = _mm256_set1_ps(0.0f); // Set factor to 0.0f
+    __m256 factor = _mm256_set1_ps(0.0f);
     int i = 0;
     // Process multiples of 8
     for (; i <= n - 8; i += 8) {
-        __m256 vecData = _mm256_load_ps(&x[i]);  // Load 8 floats from input
+        __m256 vecData = _mm256_load_ps(&x[i]);
         _mm256_store_ps(&x_copy[i], vecData);  // Copy to x_copy
         _mm256_store_ps(&Axb2_vec[i], factor); // Set Axb2_vec to 0
     }
@@ -230,8 +229,12 @@ int progress(
     return 0;
 }
 
-std::vector<cv::Mat> createRefDCT(const int& rows, const int& cols) {
+// this function creates initial solutions for each color channel
+// we use a generic reference image to create them
+std::vector<cv::Mat> createRefSolutions(const int& rows, const int& cols) {
     cv::Mat ref = cv::imread("ref.png", cv::IMREAD_COLOR);
+
+    // resizing to accomodate the size of the tiles
     cv::resize(ref, ref, cv::Size(rows, cols));
     std::vector<cv::Mat> c;
     cv::split(ref, c);
@@ -246,7 +249,8 @@ std::vector<cv::Mat> createRefDCT(const int& rows, const int& cols) {
     return c;
 }
 
-void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, const int& k, const float& param_c, const int& rows, const int& cols, std::vector<int>& ri_x, std::vector<int>& ri_y, const int& iterations, std::vector<cv::Mat> ref) {
+// reconstructs a color channel using LBFGS
+void reconstruct_color_channel(const cv::Mat& measurement, const int& k, const float& param_c, const int& rows, const int& cols, const std::vector<int>& ri_x, const std::vector<int>& ri_y, const int& iterations, cv::Mat& ref) {
 
     int n = rows * cols; // size of solution (size of vectorized image)
     float fx;
@@ -292,12 +296,11 @@ void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, const int& k, 
     data.rows = rows;
     data.cols = cols;
 
-    lbfgs_ret = lbfgs(n, (float*)ref[k].data, data, &fx, evaluate, update_progress, NULL, &param);
+    lbfgs_ret = lbfgs(n, (float*)ref.data, data, &fx, evaluate, update_progress, NULL, &param);
 
-    cv::Mat AtAxb2(rows, cols, CV_32F, (float*)ref[k].data);
+    cv::Mat AtAxb2(rows, cols, CV_32F, (float*)ref.data);
     dct(AtAxb2, AtAxb2, cv::DCT_INVERSE);
     AtAxb2 = AtAxb2 * 255.0f;
-    out = AtAxb2;// .clone();
 }
 
 std::vector<std::string> splitString(const std::string& str, const char& delimiter) {

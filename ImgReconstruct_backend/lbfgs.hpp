@@ -57,8 +57,8 @@
         float* b;
         float* Axb2;
         float* x_copy;
-        int* ri_x;
-        int* ri_y;
+        const int* ri_x;
+        const int* ri_y;
         int m;
         int rows;
         int cols;

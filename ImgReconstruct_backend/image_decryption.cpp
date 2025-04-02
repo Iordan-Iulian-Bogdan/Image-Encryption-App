@@ -42,16 +42,13 @@ decrypt_image::decrypt_image(cv::Mat input) {
     org_size.width = (float)std::stoi(splitText[4]);
 }
 
-void decrypt_image::decrypt(std::vector<cv::Mat>& ref, const std::vector<int>& ri_x_g, const std::vector<int>& ri_y_g, const int num_iterations, const float coef, cv::Mat& out) {
-    ri_x = ri_x_g;
-    ri_y = ri_y_g;
-    int n = rows * cols;
+void decrypt_image::decrypt(cv::Mat ref[3], const std::vector<int>& ri_x_g, const std::vector<int>& ri_y_g, const int num_iterations, const float coef, cv::Mat& out) {
 
-    for (int i = 0; i < 3; i++) {
-        reconstruct_color_chanel(c[i], encrypted_img, i, coef, rows, cols, ri_x, ri_y, num_iterations, ref);
-    }
+    reconstruct_color_channel(encrypted_img, 0, coef, rows, cols, ri_x_g, ri_y_g, num_iterations, ref[0]);
+    reconstruct_color_channel(encrypted_img, 1, coef, rows, cols, ri_x_g, ri_y_g, num_iterations, ref[1]);
+    reconstruct_color_channel(encrypted_img, 2, coef, rows, cols, ri_x_g, ri_y_g, num_iterations, ref[2]);
 
-    cv::merge(c, 3, out);
+    cv::merge(ref, 3, out);
     out.convertTo(out, CV_8UC3);
 }
 
@@ -77,8 +74,8 @@ void decrypt_image::writeDecryptedImageToDisk(std::string output_path, bool remo
 
 
 void decrypt_image::get_sampled_mat(const std::string& password, cv::Mat& sampled_mat, cv::Mat& masked_mat) {
-    sampled_mat = cv::Mat::zeros(rows, cols, CV_8UC3);
-    masked_mat = cv::Mat::zeros(rows, cols, CV_8UC3);
+    sampled_mat = cv::Mat(rows, cols, CV_8UC3);
+    masked_mat = cv::Mat(rows, cols, CV_8UC3);
     ri_x.resize(m);
     ri_y.resize(m);
     returnRandomIndices(ri_x, ri_y, rows, cols, m, password);

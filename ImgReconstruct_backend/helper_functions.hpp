@@ -26,7 +26,7 @@ cv::Mat reconstructImage(const std::vector<std::vector<cv::Mat>>& tiles,
 // Function to update the image
 void updateImage(const std::string& windowName, const cv::Mat& newImage);
 std::vector<cv::Mat> splitMat(cv::Mat& image, int M, int N);
-inline void updateAxb2AndComputeFx(float* x_copy, int* ri_x, int* ri_y,
+inline void updateAxb2AndComputeFx(float* x_copy, const int* ri_x, const int* ri_y,
     float* Axb2_vec, const float* b, int cols, float& fx, int n);
 inline void eval_g(float* Axb2, float* g, int n);
 inline void copy_x(float* x_copy, float* x, float* Axb2_vec, int n);
@@ -50,8 +50,8 @@ int progress(
     int k,
     int ls
 );
-std::vector<cv::Mat> createRefDCT(const int& rows, const int& cols);
-void reconstruct_color_chanel(cv::Mat& out, cv::Mat& measurement, const int& k, const float& param_c, const int& rows, const int& cols, std::vector<int>& ri_x, std::vector<int>& ri_y, const int& iterations, std::vector<cv::Mat> ref);
+std::vector<cv::Mat> createRefSolutions(const int& rows, const int& cols);
+void reconstruct_color_channel(const cv::Mat& measurement, const int& k, const float& param_c, const int& rows, const int& cols, const std::vector<int>& ri_x, const std::vector<int>& ri_y, const int& iterations, cv::Mat& ref);
 std::vector<std::string> splitString(const std::string& str, const char& delimiter);
 std::string removeCharacter(const std::string& str, const char& ch);
 void storeStringInColorMat(const std::string& text, cv::Mat& colorMat);

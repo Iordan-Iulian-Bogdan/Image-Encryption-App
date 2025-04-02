@@ -5,7 +5,6 @@
 
 class decrypt_image : CSencryption {
 private:
-    cv::Mat c[3];
 
 public:
     decrypt_image(const std::string input_path);
@@ -14,7 +13,7 @@ public:
 
     decrypt_image(cv::Mat input);
 
-    void decrypt(std::vector<cv::Mat>& ref, const std::vector<int>& ri_x_g, const std::vector<int>& ri_y_g, const int num_iterations, const float coef, cv::Mat& out);
+    void decrypt(cv::Mat ref[3], const std::vector<int>& ri_x_g, const std::vector<int>& ri_y_g, const int num_iterations, const float coef, cv::Mat& out);
 
     void get_mat(cv::Mat& dest);
 

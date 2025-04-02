@@ -2,10 +2,14 @@
 #include "image_encryption.hpp"
 #include "image_decryption.hpp"
 
+//decrypts tiles in parallel
+
 static void decrypt_tiles(int num_threads, std::vector<std::vector<cv::Mat>>& mats_in, std::vector<std::vector<indices>> indices,
     std::vector<std::vector<cv::Mat>>& mats_out, std::vector<std::string> processing_order, int iterations, cv::Size tile_size, float coef) {
     
-    const std::vector<cv::Mat> ref = createRefDCT(tile_size.height, tile_size.width);
+    // we use a reference image as the initial solution
+    // this helps speed up convergence
+    const std::vector<cv::Mat> ref = createRefSolutions(tile_size.width, tile_size.height);
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (int k = 0; k < mats_in[0].size() * mats_in[0].size(); k++) {
@@ -13,7 +17,8 @@ static void decrypt_tiles(int num_threads, std::vector<std::vector<cv::Mat>>& ma
         int i = std::stoi(splitText[0]);
         int j = std::stoi(splitText[1]);
 
-        std::vector<cv::Mat> copied(3);
+        // it's faster to make a copy of the original reference rather than create one every time
+        cv::Mat copied[3];
 
         for (int i = 0; i < ref.size(); ++i) {
             copied[i] = ref[i].clone();
@@ -26,11 +31,14 @@ static void decrypt_tiles(int num_threads, std::vector<std::vector<cv::Mat>>& ma
 }
 
 static void decrypt_image_tiled(const cv::Mat& encrypted_img_g, const int& tiles, const int& overlap, const int& iterations, const int& nun_threads, const float& coef, std::string location, const std::string& password) {
+    
     cv::Mat sampled_mat;
     cv::Mat masked_mat;
     decrypt_image dimgs = decrypt_image(encrypted_img_g);
     cv::Size org_size = dimgs.get_org_size();
     int num_samples = 0;
+
+    // extracting all the sampled pixels (sampled_mat) and thier coordinates (masked_mat)
     dimgs.get_sampled_mat(password, sampled_mat, masked_mat);
 
     std::string windowName = "ImageWindow";
@@ -43,8 +51,11 @@ static void decrypt_image_tiled(const cv::Mat& encrypted_img_g, const int& tiles
     std::vector<std::vector<indices>> indices_reconfigured(N_reconfigured, std::vector<indices>(N_reconfigured));
     std::vector<std::vector<TileCoord>> coordinates;
 
+    // we split the sampled image into tiles
+    // every tile overlaps with other neighboring tiles  
+    // this is done because otherwise the titles wont quite match with eachother along the borders
+    // this becomes more obvious as the numer of samples goes down, aka more compression 
     splitImageIntoTiles(sampled_mat, reconfigured_cropped_mats_in, coordinates, N_reconfigured, overlap);
-
 
     std::vector<std::vector<std::string>> matrix(N_reconfigured, std::vector<std::string>(N_reconfigured));
 
@@ -55,7 +66,10 @@ static void decrypt_image_tiled(const cv::Mat& encrypted_img_g, const int& tiles
         }
     }
 
+    // we will decrypt the tiles in a spiral order from the middle
+    // this is done just beacuse it looks "better" this way
     const std::vector<std::string> result = spiralOrder(matrix);
+
     cv::Size tile_size;
     int estimated_number_of_samples = 0;
 
@@ -96,6 +110,7 @@ static void decrypt_image_tiled(const cv::Mat& encrypted_img_g, const int& tiles
 
     cv::Mat reconstructed = cv::Mat::zeros(sampled_mat.rows, sampled_mat.cols, CV_8UC3);
 
+    // this updates and displays the image as it is being decrypted
     display disp;
     disp.display_image(windowName, reconstructed, coordinates, reconfigured_cropped_out);
 
@@ -107,6 +122,8 @@ static void decrypt_image_tiled(const cv::Mat& encrypted_img_g, const int& tiles
     disp.stop_display();
 
     reconstructed = reconstructImage(reconfigured_cropped_out, coordinates);
+
+    // blending the overlapping tiles together for better quality
     cv::Mat blended = blendTilesWithImage(reconfigured_cropped_out, coordinates, reconstructed, 0.5f);
     cv::resize(blended, blended, org_size);
     cv::imwrite(location, blended);
