@@ -38,7 +38,7 @@ This method processes the image in tiles, it should be noted that this is techni
 
 Performance : 
 
-~5 seconds to decompress and decrypt a 4032 X 3024 image on a Ryzen 7900.
+~3.5 seconds to decompress and decrypt a 4032 X 3024 image on a Ryzen 7900.
 
 TODO List : 
 
