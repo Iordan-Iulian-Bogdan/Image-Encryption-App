@@ -22,14 +22,16 @@ void CSencryption::returnRandomIndices(std::vector<int>& ri_x, std::vector<int>&
         generator.seed(seeds[i]);
 
         int k = 0;
+        int base_x = i * (numOfIndices / seeds.size());
+        int base_y = i * (numOfIndices / seeds.size());
 
         for (; k < numOfIndices / seeds.size();) {
             int x = disx(generator);
             int y = disy(generator);
 
             if (xy[x][y] != true) {
-                ri_x[i * (numOfIndices / seeds.size()) + k] = x;
-                ri_y[i * (numOfIndices / seeds.size()) + k] = y;
+                ri_x[base_x + k] = x;
+                ri_y[base_y + k] = y;
                 xy[x][y] = true;
                 k++;
             }

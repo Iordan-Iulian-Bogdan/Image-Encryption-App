@@ -106,3 +106,12 @@ cv::Size encrypt_image::get_size() {
 void encrypt_image::writeEncryptedImageToDisk(const std::string& output_path) {
     cv::imwrite(output_path, encrypted_img);
 }
+
+void encrypt_image_tiled(const float& compression_ratio, const std::string& input_path, const std::string& output_path, const std::string& password) {
+
+    cv::Mat input_img;
+    input_img = cv::imread(input_path);
+    encrypt_image encrypt_img(input_img);
+    encrypt_img.encrypt(compression_ratio, password);
+    cv::imwrite(output_path, encrypt_img.get_mat());
+}

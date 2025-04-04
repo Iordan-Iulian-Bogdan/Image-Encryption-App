@@ -26,4 +26,8 @@ public:
     cv::Size get_org_size();
 };
 
+void decrypt_tiles(int num_threads, std::vector<std::vector<cv::Mat>>& mats_in, std::vector<std::vector<indices>> indices,
+    std::vector<std::vector<cv::Mat>>& mats_out, std::vector<std::string> processing_order, int iterations, cv::Size tile_size, float coef);
+void decrypt_image_tiled(const int& tiles, const int& overlap, const int& iterations, const int& nun_threads, const float& coef, const std::string& input_path, const std::string& output_path, const std::string& password);
+
 #endif

@@ -30,4 +30,6 @@ public:
 private:
 };
 
+void encrypt_image_tiled(const float& compression_ratio, const std::string& input_path, const std::string& output_path, const std::string& password);
+
 #endif

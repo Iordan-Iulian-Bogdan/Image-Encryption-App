@@ -187,6 +187,11 @@ inline void copy_x(float* x_copy, float* x, float* Axb2_vec, int n) {
     }
 }
 
+
+// here we are basically evaluating the objective function
+// as well as evaluating the error
+// looks very unreadable because I tried to optimize it as much as possible
+// DCTs are the limiting performance factor
 float evaluate(
     void* instance,
     const float* x,
@@ -208,6 +213,8 @@ float evaluate(
     return fx;
 }
 
+// prints out convergence metrics with every iterations
+// this is more for debugging purposes, it's not necesarry to be called
 int progress(
     void* instance,
     const float* x,
@@ -250,7 +257,7 @@ std::vector<cv::Mat> createRefSolutions(const int& rows, const int& cols) {
 }
 
 // reconstructs a color channel using LBFGS
-void reconstruct_color_channel(const cv::Mat& measurement, const int& k, const float& param_c, const int& rows, const int& cols, const std::vector<int>& ri_x, const std::vector<int>& ri_y, const int& iterations, cv::Mat& ref) {
+void reconstruct_color_channel(const cv::Mat& pixel_measurements, const int& k, const float& param_c, const int& rows, const int& cols, const std::vector<int>& ri_x, const std::vector<int>& ri_y, const int& iterations, cv::Mat& ref) {
 
     int n = rows * cols; // size of solution (size of vectorized image)
     float fx;
@@ -264,7 +271,7 @@ void reconstruct_color_channel(const cv::Mat& measurement, const int& k, const f
     std::vector<float> b;
 
     // reserving space to avoid realocations
-    b.reserve(measurement.total());
+    b.reserve(ri_x.size());
 
     //auto update_progress = progress;
     lbfgs_progress_t update_progress = NULL;
@@ -272,30 +279,27 @@ void reconstruct_color_channel(const cv::Mat& measurement, const int& k, const f
     std::vector<float> Axb2(n);
     std::vector<float> x_copy(n);
 
-    for (int i = 11; i < ri_x.size() + 11; i++) {
+    // extracting pixel measurements from encrypted image
+    for (int i = 11; i < ri_x.size() + 11 && i < pixel_measurements.total(); i++) {
+        b.push_back(pixel_measurements.at<cv::Vec3b>(i)[k] / 255.0f);
+    }
 
-        // Because of the way the sampled tiles are constructed 
-        // it's possible to go out of bounds so we do an aditional check here
-        if (i < measurement.total()) {
-            b.push_back(measurement.at<cv::Vec3b>(i)[k] / 255.0f);
-        }
-        else
-        {
-            b.push_back(0.0f);
-        }
+    // sometimes the number of sampled pixels in a tile wont be exactly ri_x.size()
+    // so we just make the rest of them 0
+    for (int i = b.size(); i < ri_x.size(); i++) {
+        b.push_back(0.0f);
     }
 
     data.b = b.data();
     data.Axb2 = Axb2.data();
     data.x_copy = x_copy.data();
-    data.ri_x = ri_x.data();
-    data.ri_x = ri_x.data();
     data.m = ri_x.size();
     data.ri_x = ri_x.data();
     data.ri_y = ri_y.data();
     data.rows = rows;
     data.cols = cols;
 
+    // LBFGS optimization
     lbfgs_ret = lbfgs(n, (float*)ref.data, data, &fx, evaluate, update_progress, NULL, &param);
 
     cv::Mat AtAxb2(rows, cols, CV_32F, (float*)ref.data);
