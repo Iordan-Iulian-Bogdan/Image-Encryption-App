@@ -34,7 +34,7 @@ Because ```𝑥``` is a vectorized image which means it can have millions of ele
 
 GPU acceleration no longer needed since switching to Limited-memory BFGS using [this](https://github.com/chokkan/liblbfgs) library. This brought unpon a huge speed increase and lower memory consumption. 
 
-This method processes the image in tiles, it should be noted that this is technically not equivalent to solving this problem in a monolithic manner, however for something like images it works quite well and can even improve quality in some ways (lower noise) when the compression ratio is higher.
+This method processes the image in tiles, it should be noted that this is technically not equivalent to solving this problem for one single large image, however for something like images it works quite well and can even improve quality in some ways (lower noise) when the compression ratio is higher.
 
 Performance : 
 
