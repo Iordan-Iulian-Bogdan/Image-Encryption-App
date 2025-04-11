@@ -41,6 +41,6 @@ void decrypt_tiles(int num_threads, std::vector<std::vector<cv::Mat>>& mats_in, 
 @param nun_threads : number of CPU threads
 @param coef : coeficient used for the solver, higher value should be used for a more compressed image
 */
-void decrypt_image_tiled(const std::string& input_path, const std::string& output_path, const std::string& password, int parameters_type = AUTO_PARAM, int num_tiles = 24, int overlap = 48, int iterations = 20, int nun_threads = 8, float coef = 0.01f);
+int decrypt_image_tiled(const std::string& input_path, const std::string& output_path, const std::string& password, int parameters_type = AUTO_PARAM, int num_tiles = 24, int overlap = 48, int iterations = 20, int nun_threads = 8, float coef = 0.01f);
 
 #endif

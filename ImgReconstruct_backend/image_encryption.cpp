@@ -113,6 +113,14 @@ void encrypt_image_tiled(
     const std::string& password,
     const float& compression_ratio
 ){
+    try {
+        if (compression_ratio < 0.25f || compression_ratio > 1.0f) {
+            throw std::runtime_error("Compression ratio is outside the acceptable range of (0.25, 1.0)");
+        }
+    }
+    catch (const std::runtime_error& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+    }
 
     cv::Mat input_img;
     input_img = cv::imread(input_path);

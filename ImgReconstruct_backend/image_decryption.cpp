@@ -126,7 +126,7 @@ void decrypt_tiles(int num_threads, std::vector<std::vector<cv::Mat>>& mats_in, 
 
 }
 
-void decrypt_image_tiled(
+int decrypt_image_tiled(
     const std::string& input_path,
     const std::string& output_path,
     const std::string& password,
@@ -137,8 +137,31 @@ void decrypt_image_tiled(
     int nun_threads, 
     float coef
 ) {
+    try {
+        if (overlap < 24 || overlap > 96) {
+            throw std::runtime_error("Overlap is outside the acceptable range of (24, 96)");
+        }
 
-    
+        if (num_tiles < 24) {
+            throw std::runtime_error("Number of tiles is less than 20");
+        }
+
+        if (coef < 0.01f || coef > 0.05f) {
+            throw std::runtime_error("Coef is outside of the acceptable range of (0.01, 0.05)");
+        }
+
+        if (nun_threads < 1) {
+            throw std::runtime_error("Number of threads is less than 1");
+        }
+
+        if (parameters_type != AUTO_PARAM && parameters_type != MANUAL_PARAM) {
+            throw std::runtime_error("Parameters type is incorrect");
+        }
+    }
+    catch (const std::runtime_error& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return -1;
+    }
 
     //int N_reconfigured = tiles;
     std::string windowName = input_path;
@@ -236,4 +259,6 @@ void decrypt_image_tiled(
     cv::Mat blended = blendTilesWithImage(decrypted_image_tiles, coordinates, reconstructed, 0.5f);
     cv::resize(blended, blended, org_size);
     cv::imwrite(output_path, blended);
+
+    return 0;
 }
