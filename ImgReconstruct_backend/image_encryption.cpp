@@ -107,7 +107,7 @@ void encrypt_image::writeEncryptedImageToDisk(const std::string& output_path) {
     cv::imwrite(output_path, encrypted_img);
 }
 
-void encrypt_image_tiled(
+int encrypt_image_tiled(
     const std::string& input_path, 
     const std::string& output_path, 
     const std::string& password,
@@ -120,6 +120,7 @@ void encrypt_image_tiled(
     }
     catch (const std::runtime_error& e) {
         std::cerr << "Error: " << e.what() << std::endl;
+        return -1;
     }
 
     cv::Mat input_img;
@@ -127,4 +128,6 @@ void encrypt_image_tiled(
     encrypt_image encrypt_img(input_img);
     encrypt_img.encrypt(compression_ratio, password);
     cv::imwrite(output_path, encrypt_img.get_mat());
+
+    return 0;
 }

@@ -143,7 +143,7 @@ int decrypt_image_tiled(
         }
 
         if (num_tiles < 24) {
-            throw std::runtime_error("Number of tiles is less than 20");
+            throw std::runtime_error("Number of tiles is less than 24");
         }
 
         if (coef < 0.01f || coef > 0.05f) {
@@ -185,7 +185,7 @@ int decrypt_image_tiled(
         {
             coef = (1.0f / dimgs.get_compression_ratio()) * 0.01875f;
         }
-        num_tiles = 24;
+        num_tiles = 48;
         overlap = 48;
         nun_threads = omp_get_max_threads();
     }
