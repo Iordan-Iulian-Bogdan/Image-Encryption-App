@@ -7,6 +7,11 @@
 #include <stdlib.h>
 #include <random>
 #include <iostream>
+#include "wtypes.h"
+#include <omp.h>
+
+#define MANUAL_PARAM  1
+#define AUTO_PARAM  2
 
 struct TileCoord {
     int x;
@@ -23,8 +28,6 @@ int nextClosestDivisible(const int& x, const int& y);
 
 cv::Mat reconstructImage(const std::vector<std::vector<cv::Mat>>& tiles,
     const std::vector<std::vector<TileCoord>>& coordinates);
-// Function to update the image
-void updateImage(const std::string& windowName, const cv::Mat& newImage);
 std::vector<cv::Mat> splitMat(cv::Mat& image, int M, int N);
 inline void updateAxb2AndComputeFx(float* x_copy, const int* ri_x, const int* ri_y,
     float* Axb2_vec, const float* b, int cols, float& fx, int n);
@@ -57,7 +60,7 @@ std::string removeCharacter(const std::string& str, const char& ch);
 void storeStringInColorMat(const std::string& text, cv::Mat& colorMat);
 std::string retrieveStringFromColorMat(const cv::Mat& colorMat);
 std::vector<cv::Mat> splitImageIntoTiles(const cv::Mat& image, const int& tile_width, const int& tile_height, const int& rows, const int& cols);
-std::vector<std::string> spiralOrder(std::vector<std::vector<std::string>>& matrix);
+std::vector<std::string> spiralOrder(const int& tiles);
 void splitImageIntoTiles(const cv::Mat& inputImage,
     std::vector<std::vector<cv::Mat>>& tiles,
     std::vector<std::vector<TileCoord>>& coordinates,
@@ -69,24 +72,34 @@ cv::Mat blendTilesWithImage(const std::vector<std::vector<cv::Mat>>& tiles,
     float alpha);
 
 struct display {
-    std::thread display_output_thread;
-    bool g_dsp = true;
+    std::thread display_image_thread;
+    bool continue_displaying = true;
+    
+    void display_output(std::string windowName, cv::Mat& image, const std::vector<std::vector<TileCoord>>& coordinates, const std::vector<std::vector<cv::Mat>>& image_tiles) const{
+        
+        RECT desktop;
+        const HWND hDesktop = GetDesktopWindow();
+        GetWindowRect(hDesktop, &desktop);
+        int horizontal = desktop.right;
+        int vertical = desktop.bottom;
+        double ratio = double(image.cols) / double(image.rows);
+        double scale = 0.5;
 
-    void display_output(std::string windowName, cv::Mat& temp, const std::vector<std::vector<TileCoord>>& coordinates, const std::vector<std::vector<cv::Mat>>& reconfigured_cropped_out) {
-        while (g_dsp) {
+        while (continue_displaying) {
             cv::waitKey(33);
-            temp = reconstructImage(reconfigured_cropped_out, coordinates);
-            updateImage(windowName, temp);
-            cv::waitKey(1);
+            image = reconstructImage(image_tiles, coordinates);
+            cv::Mat aux = image.clone();
+            cv::resize(aux, aux, cv::Size(scale * horizontal, scale * vertical * ratio));
+            cv::imshow(windowName, aux);
         }
     }
 
-    void display_image(const std::string& windowName, cv::Mat& reconstructed, const std::vector<std::vector<TileCoord>>& coordinates, const std::vector<std::vector<cv::Mat>>& reconfigured_cropped_out) {
-        display_output_thread = std::thread(&display::display_output, this, windowName, std::ref(reconstructed), std::ref(coordinates), std::ref(reconfigured_cropped_out));
+    void display_image(const std::string& windowName, cv::Mat& reconstructed, const std::vector<std::vector<TileCoord>>& coordinates, const std::vector<std::vector<cv::Mat>>& image_tiles) {
+        display_image_thread = std::thread(&display::display_output, this, windowName, std::ref(reconstructed), std::ref(coordinates), std::ref(image_tiles));
     }
 
     void stop_display() {
-        g_dsp = false;
-        display_output_thread.join();
+        continue_displaying = false;
+        display_image_thread.join();
     }
 };

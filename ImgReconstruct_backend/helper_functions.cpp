@@ -49,8 +49,8 @@ cv::Mat reconstructImage(const std::vector<std::vector<cv::Mat>>& tiles,
         for (int j = 0; j < tileCountN; j++) {
             int rightEdge = coordinates[i][j].x + tiles[i][j].cols;
             int bottomEdge = coordinates[i][j].y + tiles[i][j].rows;
-            maxX = std::max(maxX, rightEdge);
-            maxY = std::max(maxY, bottomEdge);
+            maxX = max(maxX, rightEdge);
+            maxY = max(maxY, bottomEdge);
         }
     }
 
@@ -71,13 +71,6 @@ cv::Mat reconstructImage(const std::vector<std::vector<cv::Mat>>& tiles,
     }
 
     return output;
-}
-
-// Function to update the image
-void updateImage(const std::string& windowName, const cv::Mat& newImage) {
-    cv::Mat aux = newImage.clone();
-    cv::resize(aux, aux, cv::Size(newImage.cols / 4, newImage.rows / 4));
-    cv::imshow(windowName, aux);
 }
 
 std::vector<cv::Mat> splitMat(cv::Mat& image, int M, int N)
@@ -383,7 +376,17 @@ std::vector<cv::Mat> splitImageIntoTiles(const cv::Mat& image, const int& tile_w
     return tiles;
 }
 
-std::vector<std::string> spiralOrder(std::vector<std::vector<std::string>>& matrix) {
+std::vector<std::string> spiralOrder(const int& tiles) {
+
+    std::vector<std::vector<std::string>> matrix(tiles, std::vector<std::string>(tiles));
+
+    int k = 0;
+    for (int i = 0; i < tiles; i++) {
+        for (int j = 0; j < tiles; j++) {
+            matrix[i][j] = std::to_string(i) + "_" + std::to_string(j);
+        }
+    }
+
     std::vector<std::string> result;
     int m = matrix.size();
     if (m == 0) return result;
@@ -492,7 +495,7 @@ cv::Mat blendTilesWithImage(const std::vector<std::vector<cv::Mat>>& tiles,
     cv::Mat output = targetImage.clone();
 
     // Validate alpha value
-    alpha = std::max(0.0f, std::min(1.0f, alpha));  // Clamp between 0 and 1
+    alpha = max(0.0f, min(1.0f, alpha));  // Clamp between 0 and 1
 
     // Blend each tile with the target image
     for (int i = 0; i < tileCountN; i++) {

@@ -30,6 +30,12 @@ public:
 private:
 };
 
-void encrypt_image_tiled(const float& compression_ratio, const std::string& input_path, const std::string& output_path, const std::string& password);
+/** @brief encrypts a given image and writes the result to disk
+@param input_path : path to input image
+@param output_path : path to output image
+@param password : password to be used for encryption and decryption
+@param compression_ratio : compression ratio given as a value from 0 to 1, lower value means higher compression
+*/
+void encrypt_image_tiled(const std::string& input_path, const std::string& output_path, const std::string& password, const float& compression_ratio = 0.5f);
 
 #endif

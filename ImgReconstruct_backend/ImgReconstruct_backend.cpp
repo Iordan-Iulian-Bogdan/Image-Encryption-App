@@ -12,8 +12,8 @@ int main(int argc, char* argv)
     inputs[2] = "IMG_0007.png";
     inputs[3] = "IMG_9321.png";
 
-    encrypt_image_tiled(0.5f, inputs[0], "encrypted_img_g.png", password);
-    decrypt_image_tiled(24, 48, 20, 24, 0.045f, "encrypted_img_g.png", "decrypted_image.png", "5v48d254h33432");
-    
+    //encrypt_image_tiled(inputs[0], "encrypted_img_g.png", password, 0.5f);
+    decrypt_image_tiled("encrypted_img_g.png", "decrypted_image.png", "5v48d254h33432", AUTO_PARAM);
+
     return 0;
 }

@@ -27,7 +27,7 @@
 
 #include <stdlib.h>
 #include <memory.h>
-#include <immintrin.h>
+#include <intrin.h>
 
 #define fsigndiff(x, y) (*(x) * (*(y) / fabs(*(y))) < 0.)
 
@@ -90,10 +90,10 @@ inline static void vecadd(float* y, const float* x, const float c, const int n) 
 }
 
 inline static void vecdiff(float* z, const float* x, const float* y, const int n) {
-    int i;
-    for (i = 0; i <= n - 8; i += 8) {
-        _mm256_store_ps(&z[i], _mm256_sub_ps(_mm256_load_ps(&x[i]), _mm256_load_ps(&y[i])));
-    }
+    int i = 0;
+    //for (i = 0; i <= n - 8; i += 8) {
+        //_mm256_store_ps(&z[i], _mm256_sub_ps(_mm256_load_ps(&x[i]), _mm256_load_ps(&y[i])));
+    //}
     for (; i < n; ++i) {
         z[i] = x[i] - y[i];
     }
