@@ -1,46 +1,29 @@
 #include "CS_encryption.hpp"
 
-void CSencryption::returnRandomIndices(std::vector<int>& ri_x, std::vector<int>& ri_y, int xm, int ym, int numOfIndices, std::string password) {
+void CSencryption::returnRandomIndices(std::vector<int>& ri_x, std::vector<int>& ri_y, int xm, int ym, int numOfIndices, std::string password, float pixel_p) {
 
     auto seeds = generate_seeds(password);
     std::mt19937 generator;
+    generator.seed(seeds[seeds[0]%10]);
+    std::uniform_real_distribution<> distribution_pixels(0, 1);
+    std::uniform_int_distribution<> distribution_seeds(0, seeds.size() - 1);
 
-    std::uniform_int_distribution<> disx(0, xm - 1);
-    std::uniform_int_distribution<> disy(0, ym - 1);
+    unsigned long picked_seed = distribution_seeds(generator);
 
-    bool** xy = new bool* [xm];
+    generator.seed(picked_seed);
+
+    int k = 0;
 
     for (int i = 0; i < xm; ++i) {
-        xy[i] = new bool[ym];
-        for (int j = 0; j < ym; ++j) {
-            xy[i][j] = false;
-        }
-    }
-
-    for (int i = 0; i < seeds.size(); ++i) {
-
-        generator.seed(seeds[i]);
-
-        int k = 0;
-        int base_x = i * (numOfIndices / seeds.size());
-        int base_y = i * (numOfIndices / seeds.size());
-
-        for (; k < numOfIndices / seeds.size();) {
-            int x = disx(generator);
-            int y = disy(generator);
-
-            if (xy[x][y] != true) {
-                ri_x[base_x + k] = x;
-                ri_y[base_y + k] = y;
-                xy[x][y] = true;
+        for (int j = 0; j < ym && k < numOfIndices; ++j) {
+            if (distribution_pixels(generator) < pixel_p) {
+                ri_x[k] = i;
+                ri_y[k] = j;
                 k++;
             }
         }
     }
 
-    for (int i = 0; i < xm; ++i) {
-        delete[] xy[i];
-    }
-
-    delete[] xy;
+    shuffle(ri_x, picked_seed);
+    shuffle(ri_y, picked_seed);
 }

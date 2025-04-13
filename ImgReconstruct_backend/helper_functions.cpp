@@ -530,3 +530,24 @@ cv::Mat blendTilesWithImage(const std::vector<std::vector<cv::Mat>>& tiles,
 
     return output;
 }
+
+void shuffle(std::vector<int>& data, unsigned seed) {
+    std::mt19937 generator(seed); // Initialize random number generator with the seed
+    std::shuffle(data.begin(), data.end(), generator);
+}
+
+void reverseShuffle(std::vector<int>& data, unsigned seed) {
+    std::mt19937 generator(seed); // Reinitialize generator with the same seed
+    std::vector<int> indices(data.size());
+    std::iota(indices.begin(), indices.end(), 0);
+
+    // Shuffle the indices to determine original order
+    std::shuffle(indices.begin(), indices.end(), generator);
+
+    // Use indices to reconstruct the original order
+    std::vector<int> original(data.size());
+    for (size_t i = 0; i < data.size(); ++i) {
+        original[indices[i]] = data[i];
+    }
+    data = original;
+}

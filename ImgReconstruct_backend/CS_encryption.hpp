@@ -12,7 +12,7 @@ protected:
     int rows, cols, m, n;
     std::vector<int> ri_x, ri_y;
 
-    void returnRandomIndices(std::vector<int>& ri_x, std::vector<int>& ri_y, int xm, int ym, int numOfIndices, std::string password);
+    void returnRandomIndices(std::vector<int>& ri_x, std::vector<int>& ri_y, int xm, int ym, int numOfIndices, std::string password, float pixel_p);
 };
 
 #endif

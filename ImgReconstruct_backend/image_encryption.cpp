@@ -31,7 +31,7 @@ void encrypt_image::encrypt(const float& pixel_p, const std::string& passwrod) {
     int n = rows * cols;
     ri_x.resize(m);
     ri_y.resize(m);
-    returnRandomIndices(ri_x, ri_y, rows, cols, m, passwrod);
+    returnRandomIndices(ri_x, ri_y, rows, cols, m, passwrod, pixel_p);
     encrypted_img = cv::Mat(1, (int)(sqrt(m + 6) + 1) * (int)(sqrt(m + 6) + 1), CV_8UC3);
 
     std::string text = std::to_string(m) + "|" + std::to_string(rows) + "|" + std::to_string(cols) + "|" + std::to_string(org_size.height) + "|" + std::to_string(org_size.width); // Example string 
@@ -116,6 +116,10 @@ int encrypt_image_tiled(
     try {
         if (compression_ratio < 0.25f || compression_ratio > 1.0f) {
             throw std::runtime_error("Compression ratio is outside the acceptable range of (0.25, 1.0)");
+        }
+
+        if (password.size() < 10) {
+            throw std::runtime_error("Password should be at least 10 characters");
         }
     }
     catch (const std::runtime_error& e) {

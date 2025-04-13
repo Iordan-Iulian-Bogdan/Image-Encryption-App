@@ -79,16 +79,15 @@ void decrypt_image::get_sampled_mat(const std::string& password, cv::Mat& sample
 
     ri_x.resize(m);
     ri_y.resize(m);
-    returnRandomIndices(ri_x, ri_y, rows, cols, m, password);
-    
+    returnRandomIndices(ri_x, ri_y, rows, cols, m, password, get_compression_ratio());
+
     for (int i = 11; i < ri_x.size() + 11 - 32; i += 32) {
         // I think this helps with cache hits
         for (int j = 0; j < 32; ++j) {
-           sampled_mat.at<cv::Vec3b>(ri_x[i - 11 + j], ri_y[i - 11 + j]) = encrypted_img.at<cv::Vec3b>(i + j);
-           masked_mat.at<cv::Vec3b>(ri_x[i - 11 + j], ri_y[i - 11 + j]) = cv::Vec3b(1, 1, 1);
+            sampled_mat.at<cv::Vec3b>(ri_x[i - 11 + j], ri_y[i - 11 + j]) = encrypted_img.at<cv::Vec3b>(i + j);
+            masked_mat.at<cv::Vec3b>(ri_x[i - 11 + j], ri_y[i - 11 + j]) = cv::Vec3b(1, 1, 1);
         }
     }
-    
 }
 
 float decrypt_image::get_compression_ratio() {
@@ -185,7 +184,7 @@ int decrypt_image_tiled(
         {
             coef = (1.0f / dimgs.get_compression_ratio()) * 0.01875f;
         }
-        num_tiles = 48;
+        num_tiles = 24;
         overlap = 48;
         nun_threads = omp_get_max_threads();
     }

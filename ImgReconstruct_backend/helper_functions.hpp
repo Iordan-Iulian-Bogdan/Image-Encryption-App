@@ -9,6 +9,9 @@
 #include <iostream>
 #include "wtypes.h"
 #include <omp.h>
+#include <iomanip>
+#include <list>
+#include <numeric>
 
 #define MANUAL_PARAM  1
 #define AUTO_PARAM  2
@@ -103,3 +106,6 @@ struct display {
         display_image_thread.join();
     }
 };
+
+void shuffle(std::vector<int>& data, unsigned seed);
+void reverseShuffle(std::vector<int>& data, unsigned seed);
