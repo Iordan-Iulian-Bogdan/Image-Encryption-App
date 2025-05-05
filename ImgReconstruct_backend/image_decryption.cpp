@@ -45,9 +45,11 @@ decrypt_image::decrypt_image(cv::Mat input) {
 
 void decrypt_image::decrypt(cv::Mat ref[3], const std::vector<int>& ri_x_g, const std::vector<int>& ri_y_g, const int num_iterations, const float coef, cv::Mat& out) {
 
-    reconstruct_color_channel(encrypted_img, 0, coef, rows, cols, ri_x_g, ri_y_g, num_iterations, ref[0]);
-    reconstruct_color_channel(encrypted_img, 1, coef, rows, cols, ri_x_g, ri_y_g, num_iterations, ref[1]);
-    reconstruct_color_channel(encrypted_img, 2, coef, rows, cols, ri_x_g, ri_y_g, num_iterations, ref[2]);
+    int num_iterations_offset = (num_iterations / 3);
+
+    reconstruct_color_channel(encrypted_img, 0, coef, rows, cols, ri_x_g, ri_y_g, num_iterations, ref[0], true, ref[1]);
+    reconstruct_color_channel(encrypted_img, 1, coef, rows, cols, ri_x_g, ri_y_g, num_iterations - num_iterations_offset, ref[1], true, ref[2]);
+    reconstruct_color_channel(encrypted_img, 2, coef, rows, cols, ri_x_g, ri_y_g, num_iterations - num_iterations_offset, ref[2], false);
 
     cv::merge(ref, 3, out);
     out.convertTo(out, CV_8UC3);
@@ -160,6 +162,28 @@ int decrypt_image_tiled(
     catch (const std::runtime_error& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return -1;
+    }    
+    cv::Mat encrypted_img_g = cv::imread(input_path, cv::IMREAD_COLOR);
+    decrypt_image dimgs = decrypt_image(encrypted_img_g);
+    cv::Size org_size = dimgs.get_org_size();
+
+    if (parameters_type == AUTO_PARAM) {
+        iterations = (1.0f / dimgs.get_compression_ratio()) * 10;
+
+        if (iterations > 30) {
+            iterations = 30;
+        }
+
+        if (dimgs.get_compression_ratio() < 0.5f) {
+            coef = 0.05f;
+        }
+        else
+        {
+            coef = (1.0f / dimgs.get_compression_ratio()) * 0.01875f;
+        }
+        num_tiles = 24;
+        overlap = 24;
+        nun_threads = omp_get_max_threads();
     }
 
     //int N_reconfigured = tiles;
@@ -171,23 +195,7 @@ int decrypt_image_tiled(
     std::vector<std::vector<TileCoord>> coordinates;
     cv::Mat sampled_mat;
     cv::Mat masked_mat;
-    cv::Mat encrypted_img_g = cv::imread(input_path, cv::IMREAD_COLOR);
-    decrypt_image dimgs = decrypt_image(encrypted_img_g);
-    cv::Size org_size = dimgs.get_org_size();
-    if (parameters_type == AUTO_PARAM) {
-        iterations = (1.0f / dimgs.get_compression_ratio()) * 10;
-       
-        if (dimgs.get_compression_ratio() < 0.5f) {
-            coef = 0.05f;
-        }
-        else
-        {
-            coef = (1.0f / dimgs.get_compression_ratio()) * 0.01875f;
-        }
-        num_tiles = 24;
-        overlap = 48;
-        nun_threads = omp_get_max_threads();
-    }
+
     // extracting all the sampled pixels (sampled_mat) and thier coordinates (masked_mat)
     dimgs.get_sampled_mat(password, sampled_mat, masked_mat);
 
@@ -230,7 +238,7 @@ int decrypt_image_tiled(
             estimated_number_of_samples = ri_x_g.size();
 
             decrypted_image_tiles[i][j] = cv::Mat::zeros(encrypted_image_tiles[i][j].rows, encrypted_image_tiles[i][j].cols, CV_8UC3);
-            encrypt_image img(encrypted_image_tiles[i][j]);
+            encrypt_image img(encrypted_image_tiles[i][j], false);
 
             indices_reconfigured[i][j] = { ri_x_g, ri_y_g };
             img.encrypt(ri_x_g, ri_y_g);

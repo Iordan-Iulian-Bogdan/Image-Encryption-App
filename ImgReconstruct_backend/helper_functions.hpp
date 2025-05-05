@@ -57,7 +57,7 @@ int progress(
     int ls
 );
 std::vector<cv::Mat> createRefSolutions(const int& rows, const int& cols);
-void reconstruct_color_channel(const cv::Mat& measurement, const int& k, const float& param_c, const int& rows, const int& cols, const std::vector<int>& ri_x, const std::vector<int>& ri_y, const int& iterations, cv::Mat& ref);
+void reconstruct_color_channel(const cv::Mat& measurement, const int& k, const float& param_c, const int& rows, const int& cols, const std::vector<int>& ri_x, const std::vector<int>& ri_y, const int& iterations, cv::Mat& ref, bool copy_next_ref = false, cv::Mat& next_ref = cv::Mat());
 std::vector<std::string> splitString(const std::string& str, const char& delimiter);
 std::string removeCharacter(const std::string& str, const char& ch);
 void storeStringInColorMat(const std::string& text, cv::Mat& colorMat);

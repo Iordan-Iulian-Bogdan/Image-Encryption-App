@@ -250,7 +250,7 @@ std::vector<cv::Mat> createRefSolutions(const int& rows, const int& cols) {
 }
 
 // reconstructs a color channel using LBFGS
-void reconstruct_color_channel(const cv::Mat& pixel_measurements, const int& k, const float& param_c, const int& rows, const int& cols, const std::vector<int>& ri_x, const std::vector<int>& ri_y, const int& iterations, cv::Mat& ref) {
+void reconstruct_color_channel(const cv::Mat& pixel_measurements, const int& k, const float& param_c, const int& rows, const int& cols, const std::vector<int>& ri_x, const std::vector<int>& ri_y, const int& iterations, cv::Mat& ref, bool copy_next_ref, cv::Mat& next_ref) {
 
     int n = rows * cols; // size of solution (size of vectorized image)
     float fx;
@@ -296,6 +296,19 @@ void reconstruct_color_channel(const cv::Mat& pixel_measurements, const int& k, 
     lbfgs_ret = lbfgs(n, (float*)ref.data, data, &fx, evaluate, update_progress, NULL, &param);
 
     cv::Mat AtAxb2(rows, cols, CV_32F, (float*)ref.data);
+
+    // we are copying the current solution to the next solution for faster convergence
+    if (copy_next_ref) {
+        int i;
+        for (i = 0; i <= next_ref.total() - 8; i += 8) {
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(&next_ref.data[i]), _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&ref.data[i])));
+        }
+
+        for (; i < next_ref.total(); i++) {
+            next_ref.data[i] = ref.data[i];
+        }
+    }
+
     dct(AtAxb2, AtAxb2, cv::DCT_INVERSE);
     AtAxb2 = AtAxb2 * 255.0f;
 }

@@ -6,15 +6,17 @@ encrypt_image::encrypt_image(std::string input_path) {
     cols = input_img.cols;
     org_size.width = cols;
     org_size.height = rows;
-    cv::resize(input_img, input_img, cv::Size(nextClosestDivisible(input_img.cols, 24), nextClosestDivisible(input_img.rows, 24)));
 }
 
-encrypt_image::encrypt_image(const cv::Mat& input) {
+encrypt_image::encrypt_image(const cv::Mat& input, bool global_image) {
     input.copyTo(input_img);
     rows = input_img.rows;
     cols = input_img.cols;
     org_size.width = cols;
     org_size.height = rows;
+    if (global_image) {
+        cv::resize(input_img, input_img, cv::Size(nextClosestDivisible(input_img.cols, 8), nextClosestDivisible(input_img.rows, 8)));
+    }
 }
 
 void encrypt_image::get_mat(cv::Mat& dest) {
@@ -129,7 +131,7 @@ int encrypt_image_tiled(
 
     cv::Mat input_img;
     input_img = cv::imread(input_path);
-    encrypt_image encrypt_img(input_img);
+    encrypt_image encrypt_img(input_img, true);
     encrypt_img.encrypt(compression_ratio, password);
     cv::imwrite(output_path, encrypt_img.get_mat());
 

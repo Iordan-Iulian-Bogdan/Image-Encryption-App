@@ -11,7 +11,7 @@ private:
 public:
     encrypt_image(std::string input_path);
 
-    encrypt_image(const cv::Mat& input);
+    encrypt_image(const cv::Mat& input, bool global_image);
 
     encrypt_image() {}
 
