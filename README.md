@@ -38,7 +38,7 @@ This method processes the image in tiles, it should be noted that this is techni
 
 Performance : 
 
-~3.5 seconds to decompress and decrypt a 4032 X 3024 image on a Ryzen 7900.
+~1.0 seconds to decompress and decrypt a 4032 X 3024 image on a Ryzen 7900 after adding upscaling using [this library](https://github.com/avaneev/avir).
 
 TODO List : 
 
