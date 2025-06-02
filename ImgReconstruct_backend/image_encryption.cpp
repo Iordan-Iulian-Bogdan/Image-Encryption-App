@@ -131,6 +131,15 @@ int encrypt_image_tiled(
 
     cv::Mat input_img;
     input_img = cv::imread(input_path);
+
+
+    //cv::Mat encrypted_img_downscaled = cv::Mat::zeros(input_img.rows / 2, input_img.cols / 2, CV_8UC3);
+    //typedef avir::fpclass_def< float, float,
+      //  avir::CImageResizerDithererErrdINL< float > > fpclass_dith;
+    //avir::CImageResizer< fpclass_dith > ImageResizer(8);
+    //ImageResizer.resizeImage(input_img.data, input_img.cols, input_img.rows, 0, encrypted_img_downscaled.data, input_img.cols / 2, input_img.rows / 2, 3, 0);
+
+    cv::resize(input_img, input_img, cv::Size(input_img.cols / 2, input_img.rows / 2));
     encrypt_image encrypt_img(input_img, true);
     encrypt_img.encrypt(compression_ratio, password);
     cv::imwrite(output_path, encrypt_img.get_mat());

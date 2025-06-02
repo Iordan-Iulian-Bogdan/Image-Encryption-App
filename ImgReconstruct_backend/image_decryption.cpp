@@ -124,7 +124,6 @@ void decrypt_tiles(int num_threads, std::vector<std::vector<cv::Mat>>& mats_in, 
         decrypt_image dimgs = decrypt_image(mats_in[i][j]);
         dimgs.decrypt(copied, indices[i][j].ri_x_g, indices[i][j].ri_y_g, iterations, coef, mats_out[i][j]);
     }
-
 }
 
 int decrypt_image_tiled(
@@ -175,7 +174,7 @@ int decrypt_image_tiled(
         }
 
         if (dimgs.get_compression_ratio() < 0.5f) {
-            coef = 0.05f;
+            coef = 0.045f;
         }
         else
         {
@@ -263,9 +262,21 @@ int decrypt_image_tiled(
     reconstructed = reconstructImage(decrypted_image_tiles, coordinates);
 
     // blending the overlapping tiles together for better quality
-    cv::Mat blended = blendTilesWithImage(decrypted_image_tiles, coordinates, reconstructed, 0.5f);
-    cv::resize(blended, blended, org_size);
-    cv::imwrite(output_path, blended);
+    reconstructed = blendTilesWithImage(decrypted_image_tiles, coordinates, reconstructed, 0.5f);
+    cv::resize(reconstructed, reconstructed, org_size);
+
+    // upscaling the image
+    cv::Mat encrypted_img_upscaled = cv::Mat::zeros(reconstructed.rows * 2, reconstructed.cols * 2, CV_8UC3);
+    typedef avir::fpclass_def< float, float,
+        avir::CImageResizerDithererErrdINL< float > > fpclass_dith;
+    avir::CImageResizer< fpclass_dith > ImageResizer(8);
+    ImageResizer.resizeImage(reconstructed.data, reconstructed.cols, reconstructed.rows, 0, encrypted_img_upscaled.data, reconstructed.cols * 2, reconstructed.rows * 2, 3, 0);
+    
+    // sharpening the image to bring out more detail
+    cv::Mat sharpened;
+    float sharpness = 0.3f;
+    sharpenImage(encrypted_img_upscaled, sharpened, sharpness);
+    cv::imwrite(output_path, sharpened);
 
     return 0;
 }

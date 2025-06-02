@@ -295,8 +295,6 @@ void reconstruct_color_channel(const cv::Mat& pixel_measurements, const int& k, 
     // LBFGS optimization
     lbfgs_ret = lbfgs(n, (float*)ref.data, data, &fx, evaluate, update_progress, NULL, &param);
 
-    cv::Mat AtAxb2(rows, cols, CV_32F, (float*)ref.data);
-
     // we are copying the current solution to the next solution for faster convergence
     if (copy_next_ref) {
         int i;
@@ -309,6 +307,7 @@ void reconstruct_color_channel(const cv::Mat& pixel_measurements, const int& k, 
         }
     }
 
+    cv::Mat AtAxb2(rows, cols, CV_32F, (float*)ref.data);
     dct(AtAxb2, AtAxb2, cv::DCT_INVERSE);
     AtAxb2 = AtAxb2 * 255.0f;
 }
@@ -563,4 +562,21 @@ void reverseShuffle(std::vector<int>& data, unsigned seed) {
         original[indices[i]] = data[i];
     }
     data = original;
+}
+
+void sharpenImage(const cv::Mat& input, cv::Mat& output, float sharpness) {
+
+    output = input.clone();
+
+    float kernel_data[] = {
+        0, -1,  0,
+       -1,  5, -1,
+        0, -1,  0
+    };
+    cv::Mat kernel(3, 3, CV_32F, kernel_data);
+    cv::filter2D(input, output, -1, kernel);
+
+    cv::Mat blurred;
+    cv::GaussianBlur(input, blurred, cv::Size(0, 0), 3);
+    cv::addWeighted(input, 1.0 + sharpness, blurred, -sharpness, 0, output);
 }

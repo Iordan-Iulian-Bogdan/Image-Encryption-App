@@ -204,10 +204,15 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="arithmetic_ansi.h" />
+    <ClInclude Include="avir.h" />
+    <ClInclude Include="avir_dil.h" />
+    <ClInclude Include="avir_float4_sse.h" />
+    <ClInclude Include="avir_float8_avx.h" />
     <ClInclude Include="CS_encryption.hpp" />
     <ClInclude Include="helper_functions.hpp" />
     <ClInclude Include="image_decryption.hpp" />
     <ClInclude Include="image_encryption.hpp" />
+    <ClInclude Include="lancir.h" />
     <ClInclude Include="lbfgs.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

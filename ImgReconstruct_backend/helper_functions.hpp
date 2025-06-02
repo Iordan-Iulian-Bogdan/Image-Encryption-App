@@ -12,6 +12,12 @@
 #include <iomanip>
 #include <list>
 #include <numeric>
+#include "avir.h"
+#include <d2d1.h>
+#include <d2d1_1.h>
+#include <d2d1effects_2.h>  // Contains the sharpen effect
+#include <wrl.h>
+
 
 #define MANUAL_PARAM  1
 #define AUTO_PARAM  2
@@ -109,3 +115,4 @@ struct display {
 
 void shuffle(std::vector<int>& data, unsigned seed);
 void reverseShuffle(std::vector<int>& data, unsigned seed);
+void sharpenImage(const cv::Mat& input, cv::Mat& output, float sharpness);

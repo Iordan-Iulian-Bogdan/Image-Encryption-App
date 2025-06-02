@@ -1,5 +1,5 @@
-﻿#include "image_encryption.hpp"
-#include "image_decryption.hpp"
+﻿#include "image_decryption.hpp"
+#include "image_encryption.hpp"
 
 int main(int argc, char* argv)
 {
@@ -13,7 +13,7 @@ int main(int argc, char* argv)
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    //encrypt_image_tiled(inputs[0], "encrypted_img_g.png", "5v48d254h33432", 0.5f);
+    encrypt_image_tiled(inputs[0], "encrypted_img_g.png", "5v48d254h33432", 1.0f);
     decrypt_image_tiled("encrypted_img_g.png", "decrypted_image.png", "5v48d254h33432", AUTO_PARAM);
 
     auto end = std::chrono::high_resolution_clock::now();
