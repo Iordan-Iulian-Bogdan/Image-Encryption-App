@@ -12,9 +12,9 @@ int main(int argc, char* argv)
     inputs[3] = "IMG_9321.png";
 
     auto start = std::chrono::high_resolution_clock::now();
-
-    encrypt_image_tiled(inputs[0], "encrypted_img_g.png", "5v48d254h33432", 1.0f);
-    decrypt_image_tiled("encrypted_img_g.png", "decrypted_image.png", "5v48d254h33432", AUTO_PARAM);
+    CSencryption::params = AUTO_PARAM;
+    encrypt_image::encrypt_image_tiled(inputs[0], "encrypted_img_g.png", "5v48d254h33432");
+    decrypt_image::decrypt_image_tiled("encrypted_img_g.png", "decrypted_image.png", "5v48d254h33432");
 
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();

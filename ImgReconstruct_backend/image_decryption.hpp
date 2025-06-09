@@ -26,21 +26,22 @@ public:
     float get_compression_ratio();
 
     cv::Size get_org_size();
+
+    /** @brief decrypts a given image and writes the result to disk
+    @param input_path:  path to input image
+    @param output_path:  path to output image
+    @param password:  password to be used for encryption and decryption
+    @param parameters_type: use AUTO_PARAM for automatically choosing parameters or MANUAL_PARAM for fine tuning
+    @param num_tiles : number of tiles to be processed
+    @param overlap : how many pixels should the tiles overlap, bigger number may result in better quality
+    @param iterations : number of iterations, higher value may result in better quality
+    @param nun_threads : number of CPU threads
+    @param coef : coeficient used for the solver, higher value should be used for a more compressed image
+    */
+    static int decrypt_image_tiled(const std::string& input_path, const std::string& output_path, const std::string& password, int num_tiles = 24, int overlap = 48, int iterations = 20, int nun_threads = 8, float coef = 0.01f);
+
 };
 
 void decrypt_tiles(int num_threads, std::vector<std::vector<cv::Mat>>& mats_in, std::vector<std::vector<indices>> indices,
     std::vector<std::vector<cv::Mat>>& mats_out, std::vector<std::string> processing_order, int iterations, cv::Size tile_size, float coef);
-/** @brief decrypts a given image and writes the result to disk
-@param input_path:  path to input image
-@param output_path:  path to output image
-@param password:  password to be used for encryption and decryption
-@param parameters_type: use AUTO_PARAM for automatically choosing parameters or MANUAL_PARAM for fine tuning
-@param num_tiles : number of tiles to be processed
-@param overlap : how many pixels should the tiles overlap, bigger number may result in better quality
-@param iterations : number of iterations, higher value may result in better quality
-@param nun_threads : number of CPU threads
-@param coef : coeficient used for the solver, higher value should be used for a more compressed image
-*/
-int decrypt_image_tiled(const std::string& input_path, const std::string& output_path, const std::string& password, int parameters_type = AUTO_PARAM, int num_tiles = 24, int overlap = 48, int iterations = 20, int nun_threads = 8, float coef = 0.01f);
-
 #endif

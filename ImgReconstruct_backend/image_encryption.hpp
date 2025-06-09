@@ -27,6 +27,8 @@ public:
 
     cv::Size get_size(); 
 
+    static int encrypt_image_tiled(const std::string& input_path, const std::string& output_path, const std::string& password, float compression_ratio = 1.0f);
+
 private:
 };
 
@@ -36,6 +38,5 @@ private:
 @param password : password to be used for encryption and decryption
 @param compression_ratio : compression ratio given as a value from 0 to 1, lower value means higher compression
 */
-int encrypt_image_tiled(const std::string& input_path, const std::string& output_path, const std::string& password, const float& compression_ratio = 0.5f);
 
 #endif

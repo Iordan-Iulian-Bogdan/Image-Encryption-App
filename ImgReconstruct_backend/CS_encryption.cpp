@@ -1,5 +1,7 @@
 #include "CS_encryption.hpp"
 
+int CSencryption::params = AUTO_PARAM;
+
 void CSencryption::returnRandomIndices(std::vector<int>& ri_x, std::vector<int>& ri_y, int xm, int ym, int numOfIndices, std::string password, float pixel_p) {
 
     auto seeds = generate_seeds(password);

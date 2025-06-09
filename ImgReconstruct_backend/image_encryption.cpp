@@ -33,7 +33,7 @@ void encrypt_image::encrypt(const float& pixel_p, const std::string& passwrod) {
     int n = rows * cols;
     ri_x.resize(m);
     ri_y.resize(m);
-    returnRandomIndices(ri_x, ri_y, rows, cols, m, passwrod, pixel_p);
+    returnRandomIndices(ri_x, ri_y, rows, cols, m, passwrod, bm);
     encrypted_img = cv::Mat(1, (int)(sqrt(m + 6) + 1) * (int)(sqrt(m + 6) + 1), CV_8UC3);
 
     std::string text = std::to_string(m) + "|" + std::to_string(rows) + "|" + std::to_string(cols) + "|" + std::to_string(org_size.height) + "|" + std::to_string(org_size.width); // Example string 
@@ -109,13 +109,19 @@ void encrypt_image::writeEncryptedImageToDisk(const std::string& output_path) {
     cv::imwrite(output_path, encrypted_img);
 }
 
-int encrypt_image_tiled(
+int encrypt_image::encrypt_image_tiled(
     const std::string& input_path, 
     const std::string& output_path, 
     const std::string& password,
-    const float& compression_ratio
+    float compression_ratio
 ){
     try {
+
+        if (CSencryption::params == AUTO_PARAM)
+        {
+            compression_ratio = 1.0f;
+        }
+
         if (compression_ratio < 0.25f || compression_ratio > 1.0f) {
             throw std::runtime_error("Compression ratio is outside the acceptable range of (0.25, 1.0)");
         }

@@ -126,11 +126,10 @@ void decrypt_tiles(int num_threads, std::vector<std::vector<cv::Mat>>& mats_in, 
     }
 }
 
-int decrypt_image_tiled(
+int decrypt_image::decrypt_image_tiled(
     const std::string& input_path,
     const std::string& output_path,
     const std::string& password,
-    int parameters_type,
     int num_tiles,
     int overlap, 
     int iterations, 
@@ -138,24 +137,26 @@ int decrypt_image_tiled(
     float coef
 ) {
     try {
-        if (overlap < 24 || overlap > 96) {
-            throw std::runtime_error("Overlap is outside the acceptable range of (24, 96)");
-        }
+        if (CSencryption::params == MANUAL_PARAM) {
+            if (overlap < 24 || overlap > 96) {
+                throw std::runtime_error("Overlap is outside the acceptable range of (24, 96)");
+            }
 
-        if (num_tiles < 24) {
-            throw std::runtime_error("Number of tiles is less than 24");
-        }
+            if (num_tiles < 24) {
+                throw std::runtime_error("Number of tiles is less than 24");
+            }
 
-        if (coef < 0.01f || coef > 0.05f) {
-            throw std::runtime_error("Coef is outside of the acceptable range of (0.01, 0.05)");
-        }
+            if (coef < 0.01f || coef > 0.05f) {
+                throw std::runtime_error("Coef is outside of the acceptable range of (0.01, 0.05)");
+            }
 
-        if (nun_threads < 1) {
-            throw std::runtime_error("Number of threads is less than 1");
-        }
+            if (nun_threads < 1) {
+                throw std::runtime_error("Number of threads is less than 1");
+            }
 
-        if (parameters_type != AUTO_PARAM && parameters_type != MANUAL_PARAM) {
-            throw std::runtime_error("Parameters type is incorrect");
+            if (CSencryption::params != AUTO_PARAM && CSencryption::params != MANUAL_PARAM) {
+                throw std::runtime_error("Parameters type is incorrect");
+            }
         }
     }
     catch (const std::runtime_error& e) {
@@ -166,7 +167,7 @@ int decrypt_image_tiled(
     decrypt_image dimgs = decrypt_image(encrypted_img_g);
     cv::Size org_size = dimgs.get_org_size();
 
-    if (parameters_type == AUTO_PARAM) {
+    if (CSencryption::params == AUTO_PARAM) {
         iterations = (1.0f / dimgs.get_compression_ratio()) * 10;
 
         if (iterations > 30) {
@@ -265,18 +266,19 @@ int decrypt_image_tiled(
     reconstructed = blendTilesWithImage(decrypted_image_tiles, coordinates, reconstructed, 0.5f);
     cv::resize(reconstructed, reconstructed, org_size);
 
-    // upscaling the image
-    cv::Mat encrypted_img_upscaled = cv::Mat::zeros(reconstructed.rows * 2, reconstructed.cols * 2, CV_8UC3);
-    typedef avir::fpclass_def< float, float,
-        avir::CImageResizerDithererErrdINL< float > > fpclass_dith;
-    avir::CImageResizer< fpclass_dith > ImageResizer(8);
-    ImageResizer.resizeImage(reconstructed.data, reconstructed.cols, reconstructed.rows, 0, encrypted_img_upscaled.data, reconstructed.cols * 2, reconstructed.rows * 2, 3, 0);
-    
     // sharpening the image to bring out more detail
     cv::Mat sharpened;
     float sharpness = 0.3f;
-    sharpenImage(encrypted_img_upscaled, sharpened, sharpness);
-    cv::imwrite(output_path, sharpened);
+    sharpenImage(reconstructed, sharpened, sharpness);
+
+    // upscaling the image
+    cv::Mat encrypted_img_upscaled = cv::Mat::zeros(sharpened.rows * 2, sharpened.cols * 2, CV_8UC3);
+    typedef avir::fpclass_def< float, float,
+        avir::CImageResizerDithererErrdINL< float > > fpclass_dith;
+    avir::CImageResizer< fpclass_dith > ImageResizer(8);
+    ImageResizer.resizeImage(sharpened.data, sharpened.cols, sharpened.rows, 0, encrypted_img_upscaled.data, sharpened.cols * 2, sharpened.rows * 2, 3, 0);
+    
+    cv::imwrite(output_path, encrypted_img_upscaled);
 
     return 0;
 }
